@@ -95,7 +95,7 @@ class CommandHandler:
             return
 
         if command == "/stop":
-            stopped = await self._session_manager.stop_session(chat_id)
+            stopped = await self._session_manager.stop_session(chat_id, announce=False)
             await self._send_message(
                 chat_id,
                 "[session stopped]" if stopped else "No active session.",
