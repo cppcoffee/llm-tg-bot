@@ -135,15 +135,16 @@ class CommandHandler:
 
     def _providers_text(self) -> str:
         provider_items = sorted(self._settings.providers.items())
-        lines = ["Available providers:"]
         workdirs = {self._format_workdir(provider.cwd) for _, provider in provider_items}
 
         if len(workdirs) == 1:
-            lines.append(f"Workdir: {next(iter(workdirs))}")
+            shared_workdir = next(iter(workdirs))
+            lines = [f"Workdir: {shared_workdir}", "Available providers:"]
             for name, provider in provider_items:
                 lines.append(f"- {name}: {provider.display_command}")
             return "\n".join(lines)
 
+        lines = ["Available providers:"]
         for name, provider in provider_items:
             workdir = self._format_workdir(provider.cwd)
             lines.append(f"- {name}: {provider.display_command} | workdir={workdir}")
