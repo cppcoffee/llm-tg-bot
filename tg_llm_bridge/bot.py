@@ -240,23 +240,23 @@ class BridgeBot:
         text: str,
         reply_markup: ReplyKeyboardMarkup | None = None,
     ) -> None:
-        parse_mode = ParseMode.MARKDOWN
+        use_markdown = True
         while True:
             try:
                 await self._bot.send_message(
                     chat_id=chat_id,
                     text=text,
                     reply_markup=reply_markup,
-                    parse_mode=parse_mode,
+                    parse_mode=ParseMode.MARKDOWN if use_markdown else None,
                 )
                 return
             except BadRequest as exc:
-                if parse_mode and "parse" in str(exc).lower():
+                if use_markdown and "parse" in str(exc).lower():
                     logger.debug(
                         "Markdown parse failed for chat_id=%s, fallback",
                         chat_id,
                     )
-                    parse_mode = None
+                    use_markdown = False
                     continue
                 raise
             except RetryAfter as exc:
