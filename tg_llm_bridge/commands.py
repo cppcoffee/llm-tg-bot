@@ -134,13 +134,24 @@ class CommandHandler:
             )
 
     def _providers_text(self) -> str:
+        provider_items = sorted(self._settings.providers.items())
         lines = ["Available providers:"]
-        for name, provider in sorted(self._settings.providers.items()):
-            workdir = (
-                str(provider.cwd) if provider.cwd else "(current working directory)"
-            )
+        workdirs = {self._format_workdir(provider.cwd) for _, provider in provider_items}
+
+        if len(workdirs) == 1:
+            lines.append(f"Workdir: {next(iter(workdirs))}")
+            for name, provider in provider_items:
+                lines.append(f"- {name}: {provider.display_command}")
+            return "\n".join(lines)
+
+        for name, provider in provider_items:
+            workdir = self._format_workdir(provider.cwd)
             lines.append(f"- {name}: {provider.display_command} | workdir={workdir}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_workdir(workdir: object) -> str:
+        return str(workdir) if workdir else "(current working directory)"
 
     def _help_text(self, chat_id: int) -> str:
         return (
