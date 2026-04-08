@@ -10,6 +10,12 @@ from telegram.error import RetryAfter, TelegramError
 
 from llm_tg_bot.commands import CommandHandler, is_bot_command
 from llm_tg_bot.config import Settings
+from llm_tg_bot.rendering import (
+    OutgoingMessage,
+    RenderMode,
+    RenderedChunk,
+    build_message_chunks,
+)
 from llm_tg_bot.session import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -165,9 +171,13 @@ class BridgeBot:
             return True
         return False
 
-    async def _send_output(self, chat_id: int, text: str) -> None:
+    async def _send_output(self, chat_id: int, message: OutgoingMessage) -> None:
         try:
-            await self._send_message(chat_id, text)
+            await self._send_message(
+                chat_id,
+                message.text,
+                render_mode=message.render_mode,
+            )
         except TelegramError as exc:
             logger.warning("Failed to send output for chat_id=%s: %s", chat_id, exc)
 
@@ -231,13 +241,18 @@ class BridgeBot:
         chat_id: int,
         text: str,
         reply_markup: ReplyKeyboardMarkup | None = None,
+        *,
+        render_mode: RenderMode = RenderMode.PLAIN,
     ) -> None:
         if not text:
             return
 
         lock = self._send_locks.setdefault(chat_id, asyncio.Lock())
         async with lock:
-            chunks = _split_message(text, self._settings.message_max_chars)
+            chunks = build_message_chunks(
+                OutgoingMessage(text, render_mode=render_mode),
+                self._settings.message_max_chars,
+            )
             last_index = len(chunks) - 1
             for index, chunk in enumerate(chunks):
                 await self._send_chunk(
@@ -249,14 +264,17 @@ class BridgeBot:
     async def _send_chunk(
         self,
         chat_id: int,
-        text: str,
+        chunk: RenderedChunk,
         reply_markup: ReplyKeyboardMarkup | None = None,
     ) -> None:
+        text = chunk.text
+        parse_mode = chunk.parse_mode
         while True:
             try:
                 await self._bot.send_message(
                     chat_id=chat_id,
                     text=text,
+                    parse_mode=parse_mode,
                     reply_markup=reply_markup,
                 )
                 return
@@ -268,6 +286,15 @@ class BridgeBot:
                     delay,
                 )
                 await asyncio.sleep(delay)
+            except TelegramError:
+                if parse_mode is None:
+                    raise
+                logger.warning(
+                    "Formatted send failed for chat_id=%s; retrying as plain text",
+                    chat_id,
+                )
+                text = chunk.plain_text
+                parse_mode = None
 
     async def _send_chat_action(self, chat_id: int, action: ChatAction) -> bool:
         while True:
@@ -294,24 +321,6 @@ class BridgeBot:
         while True:
             await asyncio.sleep(30)
             await self._session_manager.stop_idle_sessions()
-
-
-def _split_message(text: str, limit: int) -> list[str]:
-    if len(text) <= limit:
-        return [text]
-
-    chunks: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(start + limit, len(text))
-        if end < len(text):
-            newline_index = text.rfind("\n", start, end)
-            if newline_index > start:
-                end = newline_index + 1
-        chunks.append(text[start:end])
-        start = end
-
-    return chunks
 
 
 def _retry_after_seconds(exc: RetryAfter) -> float:

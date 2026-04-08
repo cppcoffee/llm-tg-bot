@@ -2,7 +2,7 @@
 
 A Python Telegram bot that bridges chat messages to local CLI agents such as `codex`, `claude`, and `gemini`.
 
-The bridge uses a headless request/response model instead of forwarding interactive TUI output. Telegram replies therefore look like normal CLI text instead of a partially rendered terminal screen.
+The bridge uses a headless request/response model instead of forwarding interactive TUI output. Provider replies are rendered as Telegram-compatible rich text when possible, while system/status messages remain plain text.
 
 ## Project layout
 
@@ -26,7 +26,7 @@ The project uses `pyproject.toml` as the single source of truth for packaging an
 - Provider switching and session reset
 - Per-chat request queueing while a provider is busy
 - User allowlist with Telegram user IDs
-- Idle timeout cleanup, Telegram-safe message splitting, and rate limit retry
+- Idle timeout cleanup, Telegram-safe message splitting, markdown-to-Telegram rendering, and rate limit retry
 
 ## Quick start
 
@@ -104,7 +104,7 @@ uv run python -m llm_tg_bot.main
 - `/stop`: Stop and forget the current session
 - `/cancel`: Cancel the in-flight provider request, or abort `/new` setup before the new session starts
 
-Plain text messages are sent as standalone headless CLI requests and the resulting text is sent back to Telegram. If a chat sends more messages while a request is still running, the bridge queues them and replies with how many requests are ahead. Slash-prefixed text that is not a bot command is also forwarded directly.
+Plain text messages are sent as standalone headless CLI requests and the resulting text is sent back to Telegram. Successful provider replies are rendered with Telegram HTML formatting for common markdown constructs such as headings, emphasis, links, lists, and fenced code blocks; if formatting fails, the bot falls back to plain text. If a chat sends more messages while a request is still running, the bridge queues them and replies with how many requests are ahead. Slash-prefixed text that is not a bot command is also forwarded directly.
 
 ## Codex workdir notes
 

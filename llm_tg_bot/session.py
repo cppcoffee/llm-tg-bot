@@ -11,10 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from llm_tg_bot.providers import ProviderSpec
+from llm_tg_bot.rendering import OutgoingMessage, RenderMode
 
 logger = logging.getLogger(__name__)
 
-OutputHandler = Callable[[int, str], Awaitable[None]]
+OutputHandler = Callable[[int, OutgoingMessage], Awaitable[None]]
 RequestStartedHandler = Callable[[int, asyncio.Task[None]], None]
 
 
@@ -129,7 +130,7 @@ class SessionManager:
         record.pending_prompts.clear()
 
         if announce:
-            await self._output_callback(chat_id, "[session stopped]\n")
+            await self._output_callback(chat_id, OutgoingMessage("[session stopped]\n"))
         return True
 
     def status_text(self, chat_id: int) -> str:
@@ -163,7 +164,7 @@ class SessionManager:
         for chat_id in stale_chat_ids:
             await self.stop_session(chat_id, announce=False)
             await self._output_callback(
-                chat_id, "[session closed due to idle timeout]\n"
+                chat_id, OutgoingMessage("[session closed due to idle timeout]\n")
             )
 
     def _ensure_active_request(self, record: SessionRecord) -> bool:
@@ -252,11 +253,21 @@ class SessionManager:
                 record.request_count += 1
 
             if response:
-                await self._output_callback(record.chat_id, response)
+                render_mode = (
+                    RenderMode.MARKDOWN
+                    if process.returncode == 0
+                    else RenderMode.PLAIN
+                )
+                await self._output_callback(
+                    record.chat_id,
+                    OutgoingMessage(response, render_mode=render_mode),
+                )
             elif process.returncode != 0:
                 await self._output_callback(
                     record.chat_id,
-                    f"[request failed: exit code {process.returncode}]\n",
+                    OutgoingMessage(
+                        f"[request failed: exit code {process.returncode}]\n"
+                    ),
                 )
         except asyncio.CancelledError:
             if process and process.returncode is None:
@@ -264,7 +275,10 @@ class SessionManager:
             raise
         except Exception as exc:
             logger.exception("Provider request failed for chat_id=%s", record.chat_id)
-            await self._output_callback(record.chat_id, f"[request failed: {exc}]\n")
+            await self._output_callback(
+                record.chat_id,
+                OutgoingMessage(f"[request failed: {exc}]\n"),
+            )
         finally:
             if output_file:
                 with contextlib.suppress(FileNotFoundError):
