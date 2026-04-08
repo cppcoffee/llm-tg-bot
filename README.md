@@ -73,6 +73,27 @@ After installation, you can also run the generated console script:
 llm-tg-bot
 ```
 
+## Run without installation
+
+If you only want to start the bot from a source checkout, you can skip
+`pip install -e .` and run the module directly from the repository root:
+
+```bash
+cp .env.example .env
+python -m llm_tg_bot.main
+```
+
+Requirements:
+
+- The current Python environment already has the project dependencies installed, namely `python-dotenv` and `python-telegram-bot`
+- At least one supported CLI is available in `PATH`
+
+If you use `uv`, you can also run the project without installing the editable package:
+
+```bash
+uv run python -m llm_tg_bot.main
+```
+
 ## Telegram commands
 
 - `/help`: Show help
