@@ -8,6 +8,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from llm_tg_bot.providers import ProviderSpec
 
@@ -56,9 +57,15 @@ class SessionManager:
         self._request_started_callback = request_started_callback
         self._records: dict[int, SessionRecord] = {}
 
-    async def start_session(self, chat_id: int, provider_name: str) -> SessionRecord:
+    async def start_session(
+        self,
+        chat_id: int,
+        provider_name: str,
+        *,
+        cwd: Path | None = None,
+    ) -> SessionRecord:
         await self.stop_session(chat_id, announce=False)
-        provider = self._providers[provider_name]
+        provider = self._provider_for_session(provider_name, cwd)
         record = SessionRecord(chat_id=chat_id, provider=provider)
         self._records[chat_id] = record
         return record
@@ -135,6 +142,7 @@ class SessionManager:
         return (
             f"Active session: {record.provider.name}\n"
             f"Command: {record.provider.display_command}\n"
+            f"Workdir: {self._format_workdir(record.provider.cwd)}\n"
             f"Mode: headless request/response\n"
             f"Requests: {record.request_count}\n"
             f"Busy: {'yes' if record.is_busy else 'no'}\n"
@@ -191,6 +199,24 @@ class SessionManager:
     def _sweep_completed_task(record: SessionRecord) -> None:
         if record.active_task is not None and record.active_task.done():
             record.active_task = None
+
+    def _provider_for_session(
+        self,
+        provider_name: str,
+        cwd: Path | None,
+    ) -> ProviderSpec:
+        provider = self._providers[provider_name]
+        if cwd is None or cwd == provider.cwd:
+            return provider
+        return ProviderSpec(
+            adapter=provider.adapter,
+            cwd=cwd,
+            skip_git_repo_check=provider.skip_git_repo_check,
+        )
+
+    @staticmethod
+    def _format_workdir(workdir: Path | None) -> str:
+        return str(workdir) if workdir else "(current working directory)"
 
     async def _run_request(self, record: SessionRecord, prompt: str) -> None:
         output_file = None

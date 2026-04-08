@@ -51,7 +51,7 @@ cp .env.example .env
 - `TELEGRAM_ALLOWED_USER_IDS`: Recommended configuration. Comma-separated Telegram numeric user IDs
 - Setting the allowlist variable to `*` disables validation and should only be used during development
 - `DEFAULT_PROVIDER`: Preferred default provider, for example `codex`
-- `WORKDIR`: Working directory shared by all providers. Recommended for `codex`. If omitted, the bridge uses the directory where the bot process started
+- `WORKDIR`: Root working directory shared by all providers. `/new` lets you choose this root or one of its direct child directories for each new session. If omitted, the bridge uses the directory where the bot process started
 - `CODEX_SKIP_GIT_REPO_CHECK`: Optional. Defaults to enabled for `codex`. Set it to `0` only if you want to require a trusted Git worktree
 - `SESSION_IDLE_TIMEOUT_SECONDS`: Optional. Defaults to `2700` seconds, which closes an idle session after 45 minutes
 
@@ -78,10 +78,10 @@ llm-tg-bot
 - `/help`: Show help
 - `/list`: Show configured providers
 - `/use <provider>`: Set the preferred provider for the current chat
-- `/new [provider]`: Start a fresh logical session, optionally with a different provider
+- `/new [provider] [directory]`: Start a fresh logical session. With no arguments, the bot asks you to choose a provider and then a direct child directory under the configured workdir root
 - `/status`: Show the current chat session status, including queued requests
 - `/stop`: Stop and forget the current session
-- `/cancel`: Cancel the in-flight provider request and continue with any queued requests
+- `/cancel`: Cancel the in-flight provider request, or abort `/new` setup before the new session starts
 
 Plain text messages are sent as standalone headless CLI requests and the resulting text is sent back to Telegram. If a chat sends more messages while a request is still running, the bridge queues them and replies with how many requests are ahead. Slash-prefixed text that is not a bot command is also forwarded directly.
 
@@ -92,4 +92,5 @@ Plain text messages are sent as standalone headless CLI requests and the resulti
 - For normal use, set `WORKDIR` to the repository root you want Codex to operate on
 - The bridge enables `--skip-git-repo-check` for `codex` by default, so no extra configuration is required for non-repository directories
 - Set `CODEX_SKIP_GIT_REPO_CHECK=0` only if you explicitly want Codex to require a trusted Git worktree
-- `/list` shows the effective workdir used by each provider
+- `/list` shows the configured workdir root used by each provider
+- `/new` lets you choose `.` for that root or one of its direct child directories per session

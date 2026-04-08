@@ -95,6 +95,7 @@ class BridgeBot:
 
         chat_id = int(chat.id)
         user_id = int(user.id) if user else None
+        text = raw_text.strip()
 
         if not self._is_allowed_user(user_id):
             await self._send_message(chat_id, "Access denied for this user.")
@@ -105,8 +106,15 @@ class BridgeBot:
             )
             return
 
-        if raw_text.startswith("/"):
-            text = raw_text.strip()
+        if self._command_handler.has_pending_new_session(chat_id):
+            if not (text.startswith("/") and is_bot_command(text)):
+                handled = await self._command_handler.handle_pending_input(
+                    chat_id, raw_text
+                )
+                if handled:
+                    return
+
+        if text.startswith("/"):
             if is_bot_command(text):
                 try:
                     await self._command_handler.handle(chat_id, text)
@@ -143,9 +151,10 @@ class BridgeBot:
             )
 
         if not had_session:
+            workdir = record.provider.cwd or "(current working directory)"
             await self._send_message(
                 chat_id,
-                f"[session started: {record.provider.name}]",
+                f"[session started: {record.provider.name} | workdir={workdir}]",
                 reply_markup=_control_keyboard(),
             )
 
