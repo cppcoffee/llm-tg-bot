@@ -8,7 +8,7 @@ from telegram import Bot, ReplyKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.error import RetryAfter, TelegramError
 
-from llm_tg_bot.commands import CommandHandler, is_bot_command
+from llm_tg_bot.commands import CommandHandler
 from llm_tg_bot.config import Settings
 from llm_tg_bot.rendering import (
     OutgoingMessage,
@@ -113,7 +113,7 @@ class BridgeBot:
             return
 
         if self._command_handler.has_pending_new_session(chat_id):
-            if not (text.startswith("/") and is_bot_command(text)):
+            if not (text.startswith("/") and self._command_handler.is_command(text)):
                 handled = await self._command_handler.handle_pending_input(
                     chat_id, raw_text
                 )
@@ -121,7 +121,7 @@ class BridgeBot:
                     return
 
         if text.startswith("/"):
-            if is_bot_command(text):
+            if self._command_handler.is_command(text):
                 try:
                     await self._command_handler.handle(chat_id, text)
                 except ValueError as exc:

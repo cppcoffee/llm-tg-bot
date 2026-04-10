@@ -20,29 +20,12 @@ SendMessage = Callable[[int, str, ReplyKeyboardMarkup | None], Awaitable[None]]
 KeyboardFactory = Callable[[], ReplyKeyboardMarkup]
 CommandAction = Callable[[int, str], Awaitable[None]]
 
-BOT_COMMANDS = frozenset(
-    {
-        "/help",
-        "/list",
-        "/use",
-        "/new",
-        "/status",
-        "/stop",
-        "/cancel",
-    }
-)
-
 _DIRECTORY_BUTTON_LIMIT = 24
 _KEYBOARD_COLUMNS = 2
 
 
 def command_name(text: str) -> str:
     return text.split(maxsplit=1)[0].split("@", maxsplit=1)[0].lower()
-
-
-def is_bot_command(text: str) -> bool:
-    stripped = text.strip()
-    return bool(stripped) and command_name(stripped) in BOT_COMMANDS
 
 
 @dataclass(slots=True)
@@ -86,6 +69,10 @@ class CommandHandler:
 
     def has_pending_new_session(self, chat_id: int) -> bool:
         return chat_id in self._pending_new_session_by_chat
+
+    def is_command(self, text: str) -> bool:
+        stripped = text.strip()
+        return bool(stripped) and command_name(stripped) in self._command_handlers
 
     async def handle_pending_input(self, chat_id: int, text: str) -> bool:
         pending = self._pending_new_session_by_chat.get(chat_id)
