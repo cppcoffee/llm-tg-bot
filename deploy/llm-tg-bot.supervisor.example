@@ -1,0 +1,14 @@
+[program:llm-tg-bot]
+user=replace-me
+directory=/opt/llm-tg-bot
+command=/opt/llm-tg-bot/.venv/bin/python -m llm_tg_bot.main
+autostart=true
+autorestart=true
+startretries=10
+startsecs=5
+stopwaitsecs=10
+redirect_stderr=true
+stdout_logfile=/opt/llm-tg-bot/var/log/llm-tg-bot.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=3
+environment=PYTHONUNBUFFERED="1",HOME="/home/replace-me",PATH="/usr/local/bin:/usr/bin:/bin"

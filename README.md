@@ -1,131 +1,64 @@
 # llm-tg-bot
 
-A Python Telegram bot that bridges chat messages to local CLI agents such as `codex`, `claude`, and `gemini`.
+A Python Telegram bot that bridges chat messages to local CLI agents like `codex`, `claude`, and `gemini`. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
 
-The bridge uses a headless request/response model instead of forwarding interactive TUI output. Provider replies are rendered as Telegram-compatible rich text when possible, while system/status messages remain plain text.
+## Features
 
-## Module overview
+- **Multi-Provider Support**: Supports `codex`, `claude`, and `gemini` with per-chat logical sessions.
+- **Request Queueing**: Queues incoming messages when the provider is busy.
+- **Smart Formatting**: Converts Markdown to Telegram-safe HTML with automatic message splitting.
+- **Access Control**: User allowlist with numeric Telegram IDs.
+- **Session Management**: Automatic idle cleanup and fresh session creation via `/new`.
 
-Core modules:
+## Quick Start
 
-- `bot.py`: Telegram polling, authorization, typing indicator, outbound retry
-- `commands.py`: slash command routing and chat-level preference handling
-- `workdirs.py`: provider workdir discovery, validation, and prompt text
-- `session.py`: session lifecycle, per-chat queueing, and idle cleanup
-- `request_runner.py`: single provider subprocess execution and response shaping
-- `providers.py`: CLI adapter definitions and provider output normalization
-- `rendering.py`: Telegram-safe chunking and markdown-to-HTML conversion
+1. **Install**:
+   ```bash
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -e .
+   ```
+2. **Configure**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_IDS
+   ```
+3. **Run**:
+   ```bash
+   llm-tg-bot
+   ```
 
-The project uses `pyproject.toml` as the single source of truth for packaging and dependencies. A separate `requirements.txt` is intentionally not included.
+## Configuration
 
-## Current behavior
+Key variables in `.env`:
+- `TELEGRAM_BOT_TOKEN`: Your bot's API token.
+- `TELEGRAM_ALLOWED_USER_IDS`: Comma-separated user IDs (use `*` for open access in dev).
+- `WORKDIR`: Shared root for providers. `/new` lets you select subdirectories.
+- `DEFAULT_PROVIDER`: Default CLI to use (e.g., `codex`).
+- `SESSION_IDLE_TIMEOUT_SECONDS`: Closes idle sessions (default: 45m).
 
-- Long-polling Telegram Bot API via `python-telegram-bot`
-- Separate logical sessions per chat
-- Headless provider execution for `codex`, `claude`, and `gemini`
-- Provider switching and session reset
-- Per-chat request queueing while a provider is busy
-- User allowlist with Telegram user IDs
-- Idle timeout cleanup, Telegram-safe message splitting, markdown-to-Telegram rendering, and rate limit retry
+## Deployment
 
-## Provider permissions
+For production, use a process manager like **Supervisor**. See `deploy/llm-tg-bot.supervisor.example` for a template.
 
-The bridge launches provider CLIs in auto-approve / full-access mode:
+1. Install Supervisor: `sudo apt install supervisor`
+2. Copy the template: `sudo cp deploy/llm-tg-bot.supervisor.example /etc/supervisor/conf.d/llm-tg-bot.conf`
+3. Edit the config (update `user`, `directory`, `command`, and `environment`).
+4. Apply changes:
+   ```bash
+   sudo supervisorctl reread
+   sudo supervisorctl update
+   ```
 
-- `codex`: `--dangerously-bypass-approvals-and-sandbox`
-- `claude`: `--permission-mode bypassPermissions`
-- `gemini`: `--approval-mode yolo`
+## Telegram Commands
 
-These subprocesses inherit the operating system permissions of the user running the bot. `WORKDIR` only sets the starting directory; it is not a filesystem sandbox.
+- `/new [provider] [dir]` — Start a fresh session in a specific directory.
+- `/use <provider>` — Switch the current chat's provider.
+- `/stop` — Terminate and forget the current session.
+- `/cancel` — Interrupt the in-flight request or abort `/new` setup.
+- `/status` — View current session and queue status.
+- `/list` — List available providers and working directories.
 
-## Quick start
+## Notes
 
-1. Create a virtual environment and install the project:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip setuptools wheel
-python -m pip install -e .
-```
-
-2. Copy the environment template:
-
-```bash
-cp .env.example .env
-```
-
-3. Fill in `.env`:
-
-- `TELEGRAM_BOT_TOKEN`: Telegram bot token
-- `TELEGRAM_ALLOWED_USER_IDS`: Recommended configuration. Comma-separated Telegram numeric user IDs
-- Setting the allowlist variable to `*` disables validation and should only be used during development
-- `DEFAULT_PROVIDER`: Preferred default provider, for example `codex`
-- `WORKDIR`: Root working directory shared by all providers. `/new` lets you choose this root or one of its direct child directories for each new session. If omitted, the bridge uses the directory where the bot process started
-- `CODEX_SKIP_GIT_REPO_CHECK`: Optional. Defaults to enabled for `codex`. Set it to `0` only if you want to require a trusted Git worktree
-- `TELEGRAM_CONNECTION_POOL_SIZE`: Optional. Defaults to `8` for outbound Bot API calls
-- `TELEGRAM_POOL_TIMEOUT_SECONDS`: Optional. Defaults to `5.0` seconds when waiting for a free outbound connection
-- `SESSION_IDLE_TIMEOUT_SECONDS`: Optional. Defaults to `2700` seconds, which closes an idle session after 45 minutes
-
-4. Ensure at least one supported CLI is available in `PATH`:
-
-- `codex`
-- `claude`
-- `gemini`
-
-5. Start the bot:
-
-```bash
-python -m llm_tg_bot.main
-```
-
-After installation, you can also run the generated console script:
-
-```bash
-llm-tg-bot
-```
-
-## Run without installation
-
-If you only want to start the bot from a source checkout, you can skip
-`pip install -e .` and run the module directly from the repository root:
-
-```bash
-cp .env.example .env
-python -m llm_tg_bot.main
-```
-
-Requirements:
-
-- The current Python environment already has the project dependencies installed, namely `python-dotenv` and `python-telegram-bot`
-- At least one supported CLI is available in `PATH`
-
-If you use `uv`, you can also run the project without installing the editable package:
-
-```bash
-uv run python -m llm_tg_bot.main
-```
-
-## Telegram commands
-
-- `/help`: Show help
-- `/list`: Show configured providers
-- `/use <provider>`: Set the preferred provider for the current chat
-- `/new [provider] [directory]`: Start a fresh logical session. With no arguments, the bot asks you to choose a provider and then a direct child directory under the configured workdir root
-- `/status`: Show the current chat session status, including queued requests
-- `/stop`: Stop and forget the current session
-- `/cancel`: Cancel the in-flight provider request, or abort `/new` setup before the new session starts
-
-Plain text messages are sent as standalone headless CLI requests and the resulting text is sent back to Telegram. Successful provider replies are rendered with Telegram HTML formatting for common markdown constructs such as headings, emphasis, links, lists, and fenced code blocks; if formatting fails, the bot falls back to plain text. If a chat sends more messages while a request is still running, the bridge queues them and replies with how many requests are ahead. Slash-prefixed text that is not a bot command is also forwarded directly.
-
-The bridge uses a dedicated Telegram request client for `getUpdates` and a separate outbound request client for sends/chat actions. If you run many chats in parallel or return long, chunked responses, tune `TELEGRAM_CONNECTION_POOL_SIZE` and `TELEGRAM_POOL_TIMEOUT_SECONDS` to match your workload.
-
-## Codex workdir notes
-
-`codex` refuses to run outside a trusted Git worktree unless `--skip-git-repo-check` is passed.
-
-- For normal use, set `WORKDIR` to the repository root you want Codex to operate on
-- The bridge enables `--skip-git-repo-check` for `codex` by default, so no extra configuration is required for non-repository directories
-- Set `CODEX_SKIP_GIT_REPO_CHECK=0` only if you explicitly want Codex to require a trusted Git worktree
-- `/list` shows the configured workdir root used by each provider
-- `/new` lets you choose `.` for that root or one of its direct child directories per session
+- **Permissions**: Providers run in "yolo" / auto-approve mode, inheriting the bot process's OS permissions. **Always run the bot as a normal, unprivileged user.**
+- **Codex**: Defaults to `--skip-git-repo-check`. Set `CODEX_SKIP_GIT_REPO_CHECK=0` to require valid Git trees.

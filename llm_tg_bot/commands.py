@@ -29,6 +29,13 @@ def command_name(text: str) -> str:
 
 
 @dataclass(slots=True)
+class Command:
+    handler: CommandAction
+    help: str
+    usage: str = ""
+
+
+@dataclass(slots=True)
 class PendingNewSession:
     provider_name: str | None = None
 
@@ -47,26 +54,26 @@ class CommandHandler:
         self._keyboard_factory = keyboard_factory
         self._preferred_provider_by_chat: dict[int, str] = {}
         self._pending_new_session_by_chat: dict[int, PendingNewSession] = {}
-        self._command_handlers: dict[str, CommandAction] = {
-            "/help": self._handle_help,
-            "/list": self._handle_list,
-            "/use": self._handle_use,
-            "/new": self._handle_new,
-            "/status": self._handle_status,
-            "/queue": self._handle_queue,
-            "/stop": self._handle_stop,
-            "/cancel": self._handle_cancel,
+        self._command_handlers: dict[str, Command] = {
+            "/help": Command(self._handle_help, "Show this message"),
+            "/list": Command(self._handle_list, "List configured providers"),
+            "/use": Command(self._handle_use, "Set preferred provider", "<provider>"),
+            "/new": Command(self._handle_new, "Choose or start a session", "[provider] [directory]"),
+            "/status": Command(self._handle_status, "Show current session status"),
+            "/queue": Command(self._handle_queue, "Show queued prompts"),
+            "/stop": Command(self._handle_stop, "Stop the current session"),
+            "/cancel": Command(self._handle_cancel, "Cancel in-flight request or /new setup"),
         }
 
     async def handle(self, chat_id: int, text: str) -> None:
         parts = text.split(maxsplit=1)
         command = command_name(parts[0])
         raw_arg = parts[1].strip() if len(parts) > 1 else ""
-        handler = self._command_handlers.get(command)
-        if handler is None:
+        cmd = self._command_handlers.get(command)
+        if cmd is None:
             await self._send_message(chat_id, "Unknown command. Use /help.")
             return
-        await handler(chat_id, raw_arg)
+        await cmd.handler(chat_id, raw_arg)
 
     def has_pending_new_session(self, chat_id: int) -> bool:
         return chat_id in self._pending_new_session_by_chat
@@ -341,19 +348,16 @@ class CommandHandler:
         return "[request cancelled]" if interrupted else "No active request."
 
     def _help_text(self, chat_id: int) -> str:
-        return (
-            "Commands:\n"
-            "/help - show this message\n"
-            "/list - list configured providers\n"
-            "/use <provider> - set preferred provider for this chat\n"
-            "/new [provider] [directory] - choose or start a session\n"
-            "/status - show current session status\n"
-            "/queue - show queued prompts\n"
-            "/stop - stop the current session\n"
-            "/cancel - cancel the in-flight request or /new setup\n\n"
-            f"Current preferred provider: {self.preferred_provider(chat_id)}\n"
+        lines = ["Commands:"]
+        for cmd_name, cmd in sorted(self._command_handlers.items()):
+            usage_part = f" {cmd.usage}" if cmd.usage else ""
+            lines.append(f"{cmd_name}{usage_part} - {cmd.help}")
+        lines.append("")
+        lines.append(f"Current preferred provider: {self.preferred_provider(chat_id)}")
+        lines.append(
             "Use /new with no arguments to choose a provider and a direct child "
             "directory under the configured workdir.\n"
             "Plain text messages are forwarded as standalone CLI requests and "
             "queued while the provider is busy."
         )
+        return "\n".join(lines)
