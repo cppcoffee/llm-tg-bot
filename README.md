@@ -6,16 +6,6 @@ The bridge uses a headless request/response model instead of forwarding interact
 
 ## Module overview
 
-```text
-.
-├── llm_tg_bot/
-├── deploy/
-├── .env.example
-├── .gitignore
-├── pyproject.toml
-└── README.md
-```
-
 Core modules:
 
 - `bot.py`: Telegram polling, authorization, typing indicator, outbound retry
@@ -37,6 +27,16 @@ The project uses `pyproject.toml` as the single source of truth for packaging an
 - Per-chat request queueing while a provider is busy
 - User allowlist with Telegram user IDs
 - Idle timeout cleanup, Telegram-safe message splitting, markdown-to-Telegram rendering, and rate limit retry
+
+## Provider permissions
+
+The bridge launches provider CLIs in auto-approve / full-access mode:
+
+- `codex`: `--dangerously-bypass-approvals-and-sandbox`
+- `claude`: `--permission-mode bypassPermissions`
+- `gemini`: `--approval-mode yolo`
+
+These subprocesses inherit the operating system permissions of the user running the bot. `WORKDIR` only sets the starting directory; it is not a filesystem sandbox.
 
 ## Quick start
 

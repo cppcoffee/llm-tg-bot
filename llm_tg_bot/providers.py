@@ -63,7 +63,14 @@ class ClaudeAdapter(TextOutputAdapter):
         skip_git_repo_check: bool = False,
     ) -> PreparedRequest:
         del skip_git_repo_check
-        command = [self.executable, "-p", "--output-format", "text"]
+        command = [
+            self.executable,
+            "-p",
+            "--output-format",
+            "text",
+            "--permission-mode",
+            "bypassPermissions",
+        ]
         if resume:
             command.append("--continue")
         command.append(prompt)
@@ -82,7 +89,7 @@ class GeminiAdapter(TextOutputAdapter):
         skip_git_repo_check: bool = False,
     ) -> PreparedRequest:
         del skip_git_repo_check
-        command = [self.executable]
+        command = [self.executable, "--approval-mode", "yolo"]
         if resume:
             command.extend(["--resume", "latest"])
         command.extend(["-p", prompt, "--output-format", "text"])
@@ -104,7 +111,11 @@ class CodexAdapter(ProviderAdapter):
         os.close(fd)
         output_file = Path(temp_path)
 
-        command = [self.executable, "exec"]
+        command = [
+            self.executable,
+            "exec",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ]
         if resume:
             command.append("resume")
         if skip_git_repo_check:
