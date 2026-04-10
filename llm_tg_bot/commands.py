@@ -187,7 +187,12 @@ class CommandHandler:
     ) -> None:
         try:
             workdir = self._resolve_workdir_choice(provider_name, choice)
-            await self._start_session(chat_id, provider_name, workdir)
+            await self._start_session(
+                chat_id,
+                provider_name,
+                workdir,
+                show_keyboard=False,
+            )
         except ValueError as exc:
             await self._send_message(
                 chat_id,
@@ -246,6 +251,8 @@ class CommandHandler:
         chat_id: int,
         provider_name: str,
         workdir: Path,
+        *,
+        show_keyboard: bool = True,
     ) -> None:
         try:
             await self._session_manager.start_session(
@@ -261,7 +268,7 @@ class CommandHandler:
         await self._send_message(
             chat_id,
             f"[session started: {provider_name} | workdir={workdir}]",
-            reply_markup=self._keyboard_factory(),
+            reply_markup=self._keyboard_factory() if show_keyboard else None,
         )
 
     def _parse_new_arguments(
