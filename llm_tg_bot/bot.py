@@ -8,6 +8,13 @@ from telegram import Bot, ReplyKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.error import RetryAfter, TelegramError
 from telegram.request import HTTPXRequest
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_random_exponential,
+    before_sleep_log,
+)
 
 from llm_tg_bot.commands import CommandHandler
 from llm_tg_bot.config import Settings
@@ -68,25 +75,12 @@ class BridgeBot:
         try:
             await self._bot.initialize()
             while True:
-                try:
-                    request_kwargs: dict[str, int] = {
-                        "timeout": self._settings.poll_timeout_seconds,
-                    }
-                    if self._offset is not None:
-                        request_kwargs["offset"] = self._offset
-                    updates = await self._bot.get_updates(**request_kwargs)
-                except RetryAfter as exc:
-                    delay = _retry_after_seconds(exc)
-                    logger.warning(
-                        "Rate limited while polling Telegram; retrying in %.2fs",
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                except TelegramError as exc:
-                    logger.warning("Telegram polling failed: %s", exc)
-                    await asyncio.sleep(3)
-                    continue
+                request_kwargs: dict[str, int] = {
+                    "timeout": self._settings.poll_timeout_seconds,
+                }
+                if self._offset is not None:
+                    request_kwargs["offset"] = self._offset
+                updates = await _poll_with_retry(self._bot, request_kwargs)
 
                 for update in updates:
                     self._offset = update.update_id + 1
@@ -285,57 +279,67 @@ class BridgeBot:
         chunk: RenderedChunk,
         reply_markup: ReplyKeyboardMarkup | None = None,
     ) -> None:
-        text = chunk.text
-        parse_mode = chunk.parse_mode
-        while True:
-            try:
-                async with self._outbound_api_limiter:
-                    await self._bot.send_message(
-                        chat_id=chat_id,
-                        text=text,
-                        parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    )
-                return
-            except RetryAfter as exc:
-                delay = _retry_after_seconds(exc)
-                logger.warning(
-                    "Rate limited while sending to chat_id=%s; retrying in %.2fs",
-                    chat_id,
-                    delay,
-                )
-                await asyncio.sleep(delay)
-            except TelegramError:
-                if parse_mode is None:
-                    raise
-                logger.warning(
-                    "Formatted send failed for chat_id=%s; retrying as plain text",
-                    chat_id,
-                )
-                text = chunk.plain_text
-                parse_mode = None
+        try:
+            await self._send_message_with_retry(
+                chat_id, chunk.text, chunk.parse_mode, reply_markup
+            )
+        except TelegramError:
+            if chunk.parse_mode is None:
+                raise
+            logger.warning(
+                "Formatted send failed for chat_id=%s; retrying as plain text",
+                chat_id,
+            )
+            await self._send_message_with_retry(
+                chat_id, chunk.plain_text, None, reply_markup
+            )
+
+    @retry(
+        retry=retry_if_exception_type(RetryAfter),
+        wait=wait_random_exponential(multiplier=1, max=60),
+        stop=stop_after_attempt(10),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _send_message_with_retry(
+        self,
+        chat_id: int,
+        text: str,
+        parse_mode: str | None,
+        reply_markup: ReplyKeyboardMarkup | None,
+    ) -> None:
+        async with self._outbound_api_limiter:
+            await self._bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=parse_mode,
+                reply_markup=reply_markup,
+            )
 
     async def _send_chat_action(self, chat_id: int, action: ChatAction) -> bool:
-        while True:
-            try:
-                async with self._outbound_api_limiter:
-                    await self._bot.send_chat_action(chat_id=chat_id, action=action)
-                return True
-            except RetryAfter as exc:
-                delay = _retry_after_seconds(exc)
-                logger.warning(
-                    "Rate limited while sending chat action to chat_id=%s; retrying in %.2fs",
-                    chat_id,
-                    delay,
-                )
-                await asyncio.sleep(delay)
-            except TelegramError as exc:
-                logger.warning(
-                    "Failed to send chat action for chat_id=%s: %s",
-                    chat_id,
-                    exc,
-                )
-                return False
+        try:
+            await self._send_chat_action_with_retry(chat_id, action)
+            return True
+        except TelegramError as exc:
+            logger.warning(
+                "Failed to send chat action for chat_id=%s: %s",
+                chat_id,
+                exc,
+            )
+            return False
+
+    @retry(
+        retry=retry_if_exception_type(RetryAfter),
+        wait=wait_random_exponential(multiplier=1, max=60),
+        stop=stop_after_attempt(10),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _send_chat_action_with_retry(
+        self, chat_id: int, action: ChatAction
+    ) -> None:
+        async with self._outbound_api_limiter:
+            await self._bot.send_chat_action(chat_id=chat_id, action=action)
 
     async def _idle_cleanup_loop(self) -> None:
         while True:
@@ -343,11 +347,15 @@ class BridgeBot:
             await self._session_manager.stop_idle_sessions()
 
 
-def _retry_after_seconds(exc: RetryAfter) -> float:
-    retry_after = exc.retry_after
-    if hasattr(retry_after, "total_seconds"):
-        return max(0.0, float(retry_after.total_seconds()))
-    return max(0.0, float(retry_after))
+@retry(
+    retry=retry_if_exception_type((RetryAfter, TelegramError)),
+    wait=wait_random_exponential(multiplier=1, max=60),
+    stop=stop_after_attempt(10),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
+async def _poll_with_retry(bot: Bot, request_kwargs: dict) -> list[Update]:
+    return await bot.get_updates(**request_kwargs)
 
 
 def _control_keyboard() -> ReplyKeyboardMarkup:

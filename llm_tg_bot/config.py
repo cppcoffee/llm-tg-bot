@@ -2,27 +2,33 @@ from __future__ import annotations
 
 import os
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field, field_validator
 
 from llm_tg_bot.providers import ProviderSpec, builtin_adapters
 
 
-@dataclass(frozen=True, slots=True)
-class Settings:
-    bot_tokens: list[str]
+class Settings(BaseModel, frozen=True):
+    model_config = {"arbitrary_types_allowed": True}
+
+    bot_tokens: list[str] = Field(min_length=1)
     allow_all_users: bool
-    allowed_user_ids: frozenset[int]
+    allowed_user_ids: frozenset[int] = frozenset()
     default_provider: str
-    poll_timeout_seconds: int
-    telegram_connection_pool_size: int
-    telegram_pool_timeout_seconds: float
-    message_max_chars: int
-    session_idle_timeout_seconds: int
-    log_level: str
-    providers: dict[str, ProviderSpec]
+    poll_timeout_seconds: int = Field(gt=0, default=30)
+    telegram_connection_pool_size: int = Field(gt=0, default=8)
+    telegram_pool_timeout_seconds: float = Field(gt=0, default=5.0)
+    message_max_chars: int = Field(gt=0, default=4000)
+    session_idle_timeout_seconds: int = Field(gt=0, default=2700)
+    log_level: str = "INFO"
+    providers: dict[str, ProviderSpec] = Field(default_factory=dict)
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def uppercase_log_level(cls, v: str) -> str:
+        return str(v).upper()
 
 
 def load_settings() -> Settings:
@@ -40,12 +46,6 @@ def load_settings() -> Settings:
     allow_all_users, allowed_user_ids = _load_allowed_users(
         os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").strip()
     )
-    telegram_connection_pool_size = _int_env("TELEGRAM_CONNECTION_POOL_SIZE", 8)
-    if telegram_connection_pool_size <= 0:
-        raise ValueError("TELEGRAM_CONNECTION_POOL_SIZE must be greater than 0")
-    telegram_pool_timeout_seconds = _float_env("TELEGRAM_POOL_TIMEOUT_SECONDS", 5.0)
-    if telegram_pool_timeout_seconds <= 0:
-        raise ValueError("TELEGRAM_POOL_TIMEOUT_SECONDS must be greater than 0")
 
     return Settings(
         bot_tokens=bot_tokens,
@@ -53,11 +53,11 @@ def load_settings() -> Settings:
         allowed_user_ids=allowed_user_ids,
         default_provider=default_provider,
         poll_timeout_seconds=_int_env("POLL_TIMEOUT_SECONDS", 30),
-        telegram_connection_pool_size=telegram_connection_pool_size,
-        telegram_pool_timeout_seconds=telegram_pool_timeout_seconds,
+        telegram_connection_pool_size=_int_env("TELEGRAM_CONNECTION_POOL_SIZE", 8),
+        telegram_pool_timeout_seconds=_float_env("TELEGRAM_POOL_TIMEOUT_SECONDS", 5.0),
         message_max_chars=_int_env("MESSAGE_MAX_CHARS", 4000),
         session_idle_timeout_seconds=_int_env("SESSION_IDLE_TIMEOUT_SECONDS", 2700),
-        log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
         providers=providers,
     )
 
