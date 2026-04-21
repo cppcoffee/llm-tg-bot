@@ -8,6 +8,7 @@ from pathlib import Path
 from telegram import ReplyKeyboardMarkup
 
 from llm_tg_bot.config import Settings
+from llm_tg_bot.providers import get_provider_spec
 from llm_tg_bot.session import SessionManager
 from llm_tg_bot.workdirs import (
     directory_choices,
@@ -214,7 +215,7 @@ class CommandHandler:
             )
 
     async def _set_preferred_provider(self, chat_id: int, provider_name: str) -> None:
-        self._ensure_provider_exists(provider_name)
+        get_provider_spec(self._settings.providers, provider_name)
         self._preferred_provider_by_chat[chat_id] = provider_name
         await self._send_message(
             chat_id,
@@ -236,7 +237,7 @@ class CommandHandler:
         provider_name: str | None = None,
     ) -> None:
         if provider_name is not None:
-            self._ensure_provider_exists(provider_name)
+            get_provider_spec(self._settings.providers, provider_name)
             self._pending_new_session_by_chat[chat_id] = PendingNewSession(
                 provider_name=provider_name
             )

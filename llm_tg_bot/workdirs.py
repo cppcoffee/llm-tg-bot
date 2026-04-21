@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llm_tg_bot.providers import ProviderSpec
+from llm_tg_bot.providers import ProviderSpec, get_provider_spec
 
 
 def format_workdir(workdir: Path | None) -> str:
@@ -128,7 +128,7 @@ def visible_child_directory_names(
 
 
 def session_root(providers: dict[str, ProviderSpec], provider_name: str) -> Path:
-    provider = _provider_spec(providers, provider_name)
+    provider = get_provider_spec(providers, provider_name)
     root = provider.cwd or Path.cwd()
     try:
         resolved = root.expanduser().resolve(strict=True)
@@ -140,16 +140,3 @@ def session_root(providers: dict[str, ProviderSpec], provider_name: str) -> Path
     if not resolved.is_dir():
         raise ValueError(f"Configured workdir is not a directory: {resolved}")
     return resolved
-
-
-def _provider_spec(
-    providers: dict[str, ProviderSpec],
-    provider_name: str,
-) -> ProviderSpec:
-    try:
-        return providers[provider_name]
-    except KeyError as exc:
-        available = ", ".join(sorted(providers))
-        raise ValueError(
-            f"Unknown provider {provider_name!r}. Available: {available}"
-        ) from exc

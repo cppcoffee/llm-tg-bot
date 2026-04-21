@@ -52,21 +52,7 @@ class ProviderAdapter(ABC):
         raise NotImplementedError
 
 
-class TextOutputAdapter(ProviderAdapter):
-    def build_response(
-        self,
-        stdout_text: str,
-        stderr_text: str,
-        return_code: int,
-        output_file: Path | None,
-    ) -> ProviderResponse:
-        del output_file
-        return ProviderResponse(
-            text=_build_text_response(stdout_text, stderr_text, return_code)
-        )
-
-
-class ClaudeAdapter(TextOutputAdapter):
+class ClaudeAdapter(ProviderAdapter):
     name = "claude"
     executable = "claude"
 
@@ -103,20 +89,20 @@ class ClaudeAdapter(TextOutputAdapter):
         del output_file
         if return_code != 0:
             return ProviderResponse(
-                text=_build_text_response(stdout_text, stderr_text, return_code)
+                text=_build_response(_clean_output_text(stdout_text), stderr_text, return_code)
             )
 
         parsed = _parse_claude_json(stdout_text)
         if parsed is None:
             return ProviderResponse(
-                text=_build_text_response(stdout_text, stderr_text, return_code)
+                text=_build_response(_clean_output_text(stdout_text), stderr_text, return_code)
             )
 
         text = _build_response(parsed.text, stderr_text, return_code)
         return ProviderResponse(text=text, session_id=parsed.session_id)
 
 
-class GeminiAdapter(TextOutputAdapter):
+class GeminiAdapter(ProviderAdapter):
     name = "gemini"
     executable = "gemini"
 
@@ -133,6 +119,18 @@ class GeminiAdapter(TextOutputAdapter):
             command.extend(["--resume", "latest"])
         command.extend(["-p", prompt, "--output-format", "text"])
         return PreparedRequest(command=tuple(command))
+
+    def build_response(
+        self,
+        stdout_text: str,
+        stderr_text: str,
+        return_code: int,
+        output_file: Path | None,
+    ) -> ProviderResponse:
+        del output_file
+        return ProviderResponse(
+            text=_build_response(_clean_output_text(stdout_text), stderr_text, return_code)
+        )
 
 
 class CodexAdapter(ProviderAdapter):
@@ -197,7 +195,7 @@ class ProviderSpec:
         return self.adapter.name
 
     @property
-    def display_command(self) -> str:
+    def executable(self) -> str:
         return self.adapter.executable
 
     def prepare_request(self, prompt: str, context: RequestContext) -> PreparedRequest:
@@ -238,10 +236,6 @@ _BUILTIN_ADAPTERS: tuple[ProviderAdapter, ...] = (
 
 def builtin_adapters() -> tuple[ProviderAdapter, ...]:
     return _BUILTIN_ADAPTERS
-
-
-def _build_text_response(stdout_text: str, stderr_text: str, return_code: int) -> str:
-    return _build_response(_clean_output_text(stdout_text), stderr_text, return_code)
 
 
 def _build_response(primary_text: str, stderr_text: str, return_code: int) -> str:
@@ -326,3 +320,14 @@ def _parse_claude_json(stdout_text: str) -> _ClaudeJsonResult | None:
         text=_clean_output_text(text),
         session_id=session_id if isinstance(session_id, str) and session_id else None,
     )
+
+
+def get_provider_spec(providers: dict[str, ProviderSpec], provider_name: str) -> ProviderSpec:
+    """Get a provider spec by name, raising ValueError if not found."""
+    try:
+        return providers[provider_name]
+    except KeyError as exc:
+        available = ", ".join(sorted(providers))
+        raise ValueError(
+            f"Unknown provider {provider_name!r}. Available: {available}"
+        ) from exc
