@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -15,6 +16,7 @@ from llm_tg_bot.request_runner import run_provider_request, terminate_process
 from llm_tg_bot.workdirs import format_workdir
 
 logger = logging.getLogger(__name__)
+_WHITESPACE_RE = re.compile(r"\s+")
 
 OutputHandler = Callable[[int, OutgoingMessage], Awaitable[None]]
 RequestStartedHandler = Callable[[int, asyncio.Task[None]], None]
@@ -154,7 +156,12 @@ class SessionManager:
         lines = [f"Queue ({len(queue_list)} item(s)):"]
         for index, prompt in enumerate(queue_list, 1):
             # Truncate long prompts for display
-            display_prompt = prompt[:100] + "..." if len(prompt) > 100 else prompt
+            single_line_prompt = _WHITESPACE_RE.sub(" ", prompt).strip()
+            display_prompt = (
+                single_line_prompt[:100] + "..."
+                if len(single_line_prompt) > 100
+                else single_line_prompt
+            )
             lines.append(f"{index}. {display_prompt}")
 
         return "\n".join(lines)
