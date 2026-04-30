@@ -69,8 +69,7 @@ def _render_markdown_chunks(text: str, limit: int) -> list[RenderedChunk]:
                 RenderedChunk(text=chunk_html, plain_text=raw_chunk, parse_mode="HTML")
             )
         else:
-            for segment in split_plain_text(raw_chunk, limit):
-                chunks.append(RenderedChunk(text=segment, plain_text=segment))
+            chunks.append(RenderedChunk(text=raw_chunk, plain_text=raw_chunk))
 
     return chunks
 

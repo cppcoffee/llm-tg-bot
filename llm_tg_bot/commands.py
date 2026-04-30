@@ -129,8 +129,7 @@ class CommandHandler:
             await self._begin_new_session(chat_id, provider_name=provider_name)
             return
 
-        workdir = self._resolve_workdir_choice(provider_name, directory_choice)
-        await self._start_session(chat_id, provider_name, workdir)
+        await self._start_session_from_choice(chat_id, provider_name, directory_choice)
 
     async def _handle_status(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
@@ -200,11 +199,10 @@ class CommandHandler:
         choice: str,
     ) -> None:
         try:
-            workdir = self._resolve_workdir_choice(provider_name, choice)
-            await self._start_session(
+            await self._start_session_from_choice(
                 chat_id,
                 provider_name,
-                workdir,
+                choice,
                 show_keyboard=False,
             )
         except ValueError as exc:
@@ -223,13 +221,6 @@ class CommandHandler:
             "Use /new to restart the session with this provider.",
             reply_markup=self._keyboard_factory(),
         )
-
-    def _ensure_provider_exists(self, provider_name: str) -> None:
-        if provider_name not in self._settings.providers:
-            available = ", ".join(sorted(self._settings.providers))
-            raise ValueError(
-                f"Unknown provider {provider_name!r}. Available: {available}"
-            )
 
     async def _begin_new_session(
         self,
@@ -258,6 +249,22 @@ class CommandHandler:
                 "Send /cancel to abort."
             ),
             reply_markup=self._provider_keyboard(),
+        )
+
+    async def _start_session_from_choice(
+        self,
+        chat_id: int,
+        provider_name: str,
+        directory_choice: str,
+        *,
+        show_keyboard: bool = True,
+    ) -> None:
+        workdir = self._resolve_workdir_choice(provider_name, directory_choice)
+        await self._start_session(
+            chat_id,
+            provider_name,
+            workdir,
+            show_keyboard=show_keyboard,
         )
 
     async def _start_session(

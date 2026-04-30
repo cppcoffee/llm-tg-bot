@@ -69,10 +69,14 @@ class ClaudeSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
             first = await self.manager.send_text(1, "first", "claude")
             self.assertIsNotNone(first.record.active_task)
             await first.record.active_task
+            self.assertFalse(first.record.is_busy)
+            self.assertIsNone(first.record.active_process)
 
             second = await self.manager.send_text(1, "second", "claude")
             self.assertIsNotNone(second.record.active_task)
             await second.record.active_task
+            self.assertFalse(second.record.is_busy)
+            self.assertIsNone(second.record.active_process)
 
         self.assertEqual(len(self.commands), 2)
         first_resume = _option_value(self.commands[0], "--resume")
@@ -84,6 +88,7 @@ class ClaudeSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("--continue", self.commands[0])
         self.assertNotIn("--continue", self.commands[1])
         self.assertEqual(_option_value(self.commands[0], "--output-format"), "json")
+        self.assertIn("Command: claude", self.manager.status_text(1))
 
     async def test_different_chats_get_distinct_claude_session_ids(self) -> None:
         outputs = [
@@ -104,10 +109,14 @@ class ClaudeSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
             first = await self.manager.send_text(1, "first", "claude")
             self.assertIsNotNone(first.record.active_task)
             await first.record.active_task
+            self.assertFalse(first.record.is_busy)
+            self.assertIsNone(first.record.active_process)
 
             second = await self.manager.send_text(2, "second", "claude")
             self.assertIsNotNone(second.record.active_task)
             await second.record.active_task
+            self.assertFalse(second.record.is_busy)
+            self.assertIsNone(second.record.active_process)
 
         self.assertEqual(len(self.commands), 2)
         first_resume = _option_value(self.commands[0], "--resume")

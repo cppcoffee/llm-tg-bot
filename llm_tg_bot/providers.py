@@ -87,19 +87,14 @@ class ClaudeAdapter(ProviderAdapter):
         output_file: Path | None,
     ) -> ProviderResponse:
         del output_file
-        if return_code != 0:
-            return ProviderResponse(
-                text=_build_response(_clean_output_text(stdout_text), stderr_text, return_code)
-            )
-
-        parsed = _parse_claude_json(stdout_text)
-        if parsed is None:
-            return ProviderResponse(
-                text=_build_response(_clean_output_text(stdout_text), stderr_text, return_code)
-            )
-
-        text = _build_response(parsed.text, stderr_text, return_code)
-        return ProviderResponse(text=text, session_id=parsed.session_id)
+        parsed = _parse_claude_json(stdout_text) if return_code == 0 else None
+        primary_text = (
+            parsed.text if parsed is not None else _clean_output_text(stdout_text)
+        )
+        return ProviderResponse(
+            text=_build_response(primary_text, stderr_text, return_code),
+            session_id=parsed.session_id if parsed is not None else None,
+        )
 
 
 class GeminiAdapter(ProviderAdapter):
@@ -129,7 +124,11 @@ class GeminiAdapter(ProviderAdapter):
     ) -> ProviderResponse:
         del output_file
         return ProviderResponse(
-            text=_build_response(_clean_output_text(stdout_text), stderr_text, return_code)
+            text=_build_response(
+                _clean_output_text(stdout_text),
+                stderr_text,
+                return_code,
+            )
         )
 
 
@@ -197,6 +196,10 @@ class ProviderSpec:
     @property
     def executable(self) -> str:
         return self.adapter.executable
+
+    @property
+    def display_command(self) -> str:
+        return self.executable
 
     def prepare_request(self, prompt: str, context: RequestContext) -> PreparedRequest:
         return self.adapter.prepare_request(

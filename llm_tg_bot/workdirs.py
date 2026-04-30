@@ -12,24 +12,17 @@ def format_workdir(workdir: Path | None) -> str:
 def providers_text(providers: dict[str, ProviderSpec]) -> str:
     provider_items = sorted(providers.items())
     workdirs = {format_workdir(provider.cwd) for _, provider in provider_items}
+    shared_workdir = next(iter(workdirs)) if len(workdirs) == 1 else None
 
-    if len(workdirs) == 1:
-        shared_workdir = next(iter(workdirs))
-        lines = [
-            f"Workdir root: {shared_workdir}",
-            "Available providers:",
-        ]
-        for name, provider in provider_items:
-            lines.append(f"- {name}: {provider.display_command}")
-        lines.append("")
-        lines.append("Use /new to choose a provider and a direct child directory.")
-        return "\n".join(lines)
-
-    lines = ["Available providers:"]
+    lines = []
+    if shared_workdir is not None:
+        lines.append(f"Workdir root: {shared_workdir}")
+    lines.append("Available providers:")
     for name, provider in provider_items:
-        lines.append(
-            f"- {name}: {provider.display_command} | workdir={format_workdir(provider.cwd)}"
-        )
+        line = f"- {name}: {provider.display_command}"
+        if shared_workdir is None:
+            line += f" | workdir={format_workdir(provider.cwd)}"
+        lines.append(line)
     lines.append("")
     lines.append("Use /new to choose a provider and a direct child directory.")
     return "\n".join(lines)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable
 
 from telegram import Bot, ReplyKeyboardMarkup, Update
 from telegram.constants import ChatAction
@@ -27,6 +28,14 @@ from llm_tg_bot.rendering import (
 from llm_tg_bot.session import SessionManager
 
 logger = logging.getLogger(__name__)
+TelegramAPICall = Callable[[], Awaitable[object]]
+_TELEGRAM_RETRY = retry(
+    retry=retry_if_exception_type(RetryAfter),
+    wait=wait_random_exponential(multiplier=1, max=60),
+    stop=stop_after_attempt(10),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
 
 _CONTROL_KEYBOARD_LAYOUT = [
     ["/new", "/status", "/queue"],
@@ -263,14 +272,16 @@ class BridgeBot:
         if not text:
             return
 
+        chunks = build_message_chunks(
+            OutgoingMessage(text, render_mode=render_mode),
+            self._settings.message_max_chars,
+        )
         lock = self._send_locks.setdefault(chat_id, asyncio.Lock())
-        async with lock:
-            chunks = build_message_chunks(
-                OutgoingMessage(text, render_mode=render_mode),
-                self._settings.message_max_chars,
-            )
-            last_index = len(chunks) - 1
-            for index, chunk in enumerate(chunks):
+        last_index = len(chunks) - 1
+        for index, chunk in enumerate(chunks):
+            # Use finer-grained locking per chunk. This allows other messages (like /status)
+            # to be interleaved between chunks of a long response, improving responsiveness.
+            async with lock:
                 await self._send_chunk(
                     chat_id,
                     chunk,
@@ -284,8 +295,13 @@ class BridgeBot:
         reply_markup: ReplyKeyboardMarkup | None = None,
     ) -> None:
         try:
-            await self._send_message_with_retry(
-                chat_id, chunk.text, chunk.parse_mode, reply_markup
+            await self._call_telegram_api_with_retry(
+                lambda: self._bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk.text,
+                    parse_mode=chunk.parse_mode,
+                    reply_markup=reply_markup,
+                )
             )
         except TelegramError:
             if chunk.parse_mode is None:
@@ -294,35 +310,25 @@ class BridgeBot:
                 "Formatted send failed for chat_id=%s; retrying as plain text",
                 chat_id,
             )
-            await self._send_message_with_retry(
-                chat_id, chunk.plain_text, None, reply_markup
+            await self._call_telegram_api_with_retry(
+                lambda: self._bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk.plain_text,
+                    parse_mode=None,
+                    reply_markup=reply_markup,
+                )
             )
 
-    @retry(
-        retry=retry_if_exception_type(RetryAfter),
-        wait=wait_random_exponential(multiplier=1, max=60),
-        stop=stop_after_attempt(10),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=True,
-    )
-    async def _send_message_with_retry(
-        self,
-        chat_id: int,
-        text: str,
-        parse_mode: str | None,
-        reply_markup: ReplyKeyboardMarkup | None,
-    ) -> None:
+    @_TELEGRAM_RETRY
+    async def _call_telegram_api_with_retry(self, call: TelegramAPICall) -> None:
         async with self._outbound_api_limiter:
-            await self._bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
-            )
+            await call()
 
     async def _send_chat_action(self, chat_id: int, action: ChatAction) -> bool:
         try:
-            await self._send_chat_action_with_retry(chat_id, action)
+            await self._call_telegram_api_with_retry(
+                lambda: self._bot.send_chat_action(chat_id=chat_id, action=action)
+            )
             return True
         except TelegramError as exc:
             logger.warning(
@@ -331,19 +337,6 @@ class BridgeBot:
                 exc,
             )
             return False
-
-    @retry(
-        retry=retry_if_exception_type(RetryAfter),
-        wait=wait_random_exponential(multiplier=1, max=60),
-        stop=stop_after_attempt(10),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=True,
-    )
-    async def _send_chat_action_with_retry(
-        self, chat_id: int, action: ChatAction
-    ) -> None:
-        async with self._outbound_api_limiter:
-            await self._bot.send_chat_action(chat_id=chat_id, action=action)
 
     async def _idle_cleanup_loop(self) -> None:
         while True:

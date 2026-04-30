@@ -35,7 +35,9 @@ class SessionRecord:
 
     @property
     def is_busy(self) -> bool:
-        return self.active_task is not None and not self.active_task.done()
+        return (
+            self.active_task is not None and not self.active_task.done()
+        ) or self.active_process is not None
 
     @property
     def queued_count(self) -> int:
@@ -189,7 +191,7 @@ class SessionManager:
 
     def _ensure_active_request(self, record: SessionRecord) -> bool:
         self._sweep_completed_task(record)
-        if record.active_task is not None or not record.pending_prompts:
+        if record.is_busy or not record.pending_prompts:
             return False
 
         prompt = record.pending_prompts.popleft()
