@@ -14,23 +14,28 @@ A Python Telegram bot that bridges chat messages to local CLI agents like `codex
 
 1. **Install**:
    ```bash
-   python3 -m venv .venv && source .venv/bin/activate
+   # Create and activate virtual environment
+   python3 -m venv .venv
+   source .venv/bin/activate
+
+   # Install the package in editable mode
    pip install -e .
    ```
 2. **Configure**:
    ```bash
    cp .env.example .env
-   # Edit .env with your TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_IDS
+   # Edit .env with your TELEGRAM_BOT_TOKENS and TELEGRAM_ALLOWED_USER_IDS
    ```
 3. **Run**:
    ```bash
+   # Ensure venv is activated (source .venv/bin/activate)
    llm-tg-bot
    ```
 
 ## Configuration
 
 Key variables in `.env`:
-- `TELEGRAM_BOT_TOKEN`: Your bot's API token.
+- `TELEGRAM_BOT_TOKENS`: Your bot's API token(s). Comma-separate multiple tokens for multi-bot support.
 - `TELEGRAM_ALLOWED_USER_IDS`: Comma-separated user IDs (use `*` for open access in dev).
 - `WORKDIR`: Shared root for providers. `/new` lets you select subdirectories.
 - `DEFAULT_PROVIDER`: Default CLI to use (e.g., `codex`).

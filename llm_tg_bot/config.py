@@ -55,7 +55,7 @@ def load_settings() -> Settings:
         poll_timeout_seconds=_int_env("POLL_TIMEOUT_SECONDS", 30),
         telegram_connection_pool_size=_int_env("TELEGRAM_CONNECTION_POOL_SIZE", 8),
         telegram_pool_timeout_seconds=_float_env("TELEGRAM_POOL_TIMEOUT_SECONDS", 5.0),
-        message_max_chars=_int_env("MESSAGE_MAX_CHARS", 4000),
+        message_max_chars=_int_env("MESSAGE_MAX_CHARS", _int_env("MESSAGE_MAX_BYTES", 4000)),
         session_idle_timeout_seconds=_int_env("SESSION_IDLE_TIMEOUT_SECONDS", 2700),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         providers=providers,
@@ -63,7 +63,12 @@ def load_settings() -> Settings:
 
 
 def _load_bot_tokens() -> list[str]:
-    raw = _require_env("TELEGRAM_BOT_TOKENS")
+    raw = os.getenv("TELEGRAM_BOT_TOKENS") or os.getenv("TELEGRAM_BOT_TOKEN")
+    if not raw:
+        raise ValueError(
+            "Missing required environment variable: TELEGRAM_BOT_TOKENS. "
+            "Please set it in your .env file."
+        )
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
     if not tokens:
         raise ValueError("TELEGRAM_BOT_TOKENS must contain at least one token")
@@ -130,13 +135,6 @@ def _parse_allowed_user_ids(raw_value: str) -> frozenset[int]:
         user_ids.add(user_id)
 
     return frozenset(user_ids)
-
-
-def _require_env(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise ValueError(f"Missing required environment variable: {name}")
-    return value
 
 
 def _optional_path_env(name: str) -> Path | None:
