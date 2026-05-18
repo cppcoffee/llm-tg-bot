@@ -72,7 +72,8 @@ def _load_bot_tokens() -> list[str]:
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
     if not tokens:
         raise ValueError("TELEGRAM_BOT_TOKENS must contain at least one token")
-    return tokens
+    # Deduplicate while preserving order
+    return list(dict.fromkeys(tokens))
 
 
 def _load_providers() -> dict[str, ProviderSpec]:

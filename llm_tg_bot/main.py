@@ -27,10 +27,14 @@ async def async_main() -> None:
         level=getattr(logging, settings.log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    await asyncio.gather(
-        *(_run_bot_forever(token, settings, i) for i, token in enumerate(settings.bot_tokens)),
-        return_exceptions=True,
-    )
+    
+    tasks = []
+    for i, token in enumerate(settings.bot_tokens):
+        masked_token = f"{token[:10]}...{token[-5:]}" if len(token) > 15 else "***"
+        logger.info("Starting Bot %d with token %s", i, masked_token)
+        tasks.append(_run_bot_forever(token, settings, i))
+
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def main() -> None:

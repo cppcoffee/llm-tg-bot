@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 
 from telegram import Bot, ReplyKeyboardMarkup, Update
 from telegram.constants import ChatAction
-from telegram.error import RetryAfter, TelegramError
+from telegram.error import Conflict, RetryAfter, TelegramError
 from telegram.request import HTTPXRequest
 from tenacity import (
     retry,
@@ -87,6 +87,7 @@ class BridgeBot:
         self._idle_cleanup_task = asyncio.create_task(self._idle_cleanup_loop())
         try:
             await self._bot.initialize()
+            await self._bot.delete_webhook(drop_pending_updates=False)
             while True:
                 request_kwargs: dict[str, int] = {
                     "timeout": self._settings.poll_timeout_seconds,
@@ -345,14 +346,25 @@ class BridgeBot:
 
 
 @retry(
-    retry=retry_if_exception_type((RetryAfter, TelegramError)),
+    retry=retry_if_exception_type((RetryAfter, Conflict)),
     wait=wait_random_exponential(multiplier=1, max=60),
     stop=stop_after_attempt(10),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 async def _poll_with_retry(bot: Bot, request_kwargs: dict) -> list[Update]:
-    return await bot.get_updates(**request_kwargs)
+    try:
+        return await bot.get_updates(**request_kwargs)
+    except Conflict as exc:
+        logger.warning(
+            "Conflict on getUpdates: %s. Calling delete_webhook to clear stale connection.",
+            exc,
+        )
+        with contextlib.suppress(TelegramError):
+            await bot.delete_webhook(drop_pending_updates=False)
+        # Adding a small additional delay to avoid immediate retry-fight
+        await asyncio.sleep(1)
+        raise
 
 
 def _control_keyboard() -> ReplyKeyboardMarkup:
