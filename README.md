@@ -39,7 +39,7 @@ Key variables in `.env`:
 - `TELEGRAM_ALLOWED_USER_IDS`: Comma-separated user IDs (use `*` for open access in dev).
 - `WORKDIR`: Shared root for providers. `/new` lets you select subdirectories.
 - `DEFAULT_PROVIDER`: Default CLI to use (e.g., `codex`).
-- `SESSION_IDLE_TIMEOUT_SECONDS`: Closes idle sessions (default: 45m).
+- `SESSION_IDLE_TIMEOUT_SECONDS`: Closes idle sessions (default: 60m).
 
 ## Deployment
 

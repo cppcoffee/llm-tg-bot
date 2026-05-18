@@ -21,7 +21,7 @@ class Settings(BaseModel, frozen=True):
     telegram_connection_pool_size: int = Field(gt=0, default=8)
     telegram_pool_timeout_seconds: float = Field(gt=0, default=5.0)
     message_max_chars: int = Field(gt=0, default=4000)
-    session_idle_timeout_seconds: int = Field(gt=0, default=2700)
+    session_idle_timeout_seconds: int = Field(gt=0, default=3600)
     log_level: str = "INFO"
     providers: dict[str, ProviderSpec] = Field(default_factory=dict)
 
@@ -56,7 +56,7 @@ def load_settings() -> Settings:
         telegram_connection_pool_size=_int_env("TELEGRAM_CONNECTION_POOL_SIZE", 8),
         telegram_pool_timeout_seconds=_float_env("TELEGRAM_POOL_TIMEOUT_SECONDS", 5.0),
         message_max_chars=_int_env("MESSAGE_MAX_CHARS", _int_env("MESSAGE_MAX_BYTES", 4000)),
-        session_idle_timeout_seconds=_int_env("SESSION_IDLE_TIMEOUT_SECONDS", 2700),
+        session_idle_timeout_seconds=_int_env("SESSION_IDLE_TIMEOUT_SECONDS", 3600),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         providers=providers,
     )
