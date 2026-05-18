@@ -57,11 +57,13 @@ class SessionManager:
         idle_timeout_seconds: int,
         output_callback: OutputHandler,
         request_started_callback: RequestStartedHandler | None = None,
+        cleanup_callback: Callable[[int], None] | None = None,
     ) -> None:
         self._providers = providers
         self._idle_timeout_seconds = idle_timeout_seconds
         self._output_callback = output_callback
         self._request_started_callback = request_started_callback
+        self._cleanup_callback = cleanup_callback
         self._records: dict[int, SessionRecord] = {}
 
     async def start_session(
@@ -126,6 +128,9 @@ class SessionManager:
 
         if announce:
             await self._output_callback(chat_id, OutgoingMessage("[session stopped]\n"))
+        
+        if self._cleanup_callback:
+            self._cleanup_callback(chat_id)
         return True
 
     def status_text(self, chat_id: int) -> str:

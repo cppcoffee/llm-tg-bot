@@ -70,6 +70,7 @@ class BridgeBot:
             idle_timeout_seconds=settings.session_idle_timeout_seconds,
             output_callback=self._send_output,
             request_started_callback=self._start_typing_indicator,
+            cleanup_callback=self._cleanup_chat,
         )
         self._command_handler = CommandHandler(
             settings=settings,
@@ -82,6 +83,11 @@ class BridgeBot:
         self._outbound_api_limiter = asyncio.Semaphore(connection_pool_size)
         self._offset: int | None = None
         self._idle_cleanup_task: asyncio.Task[None] | None = None
+
+    def _cleanup_chat(self, chat_id: int) -> None:
+        self._send_locks.pop(chat_id, None)
+        self._cancel_typing_indicator(chat_id)
+        self._command_handler.cleanup_chat(chat_id)
 
     async def run(self) -> None:
         self._idle_cleanup_task = asyncio.create_task(self._idle_cleanup_loop())

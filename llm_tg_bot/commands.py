@@ -66,6 +66,10 @@ class CommandHandler:
             "/cancel": Command(self._handle_cancel, "Cancel in-flight request or /new setup"),
         }
 
+    def cleanup_chat(self, chat_id: int) -> None:
+        self._preferred_provider_by_chat.pop(chat_id, None)
+        self._pending_new_session_by_chat.pop(chat_id, None)
+
     async def handle(self, chat_id: int, text: str) -> None:
         parts = text.split(maxsplit=1)
         command = command_name(parts[0])
