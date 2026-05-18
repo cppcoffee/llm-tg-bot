@@ -68,6 +68,8 @@ class BridgeBot:
         self._session_manager = SessionManager(
             providers=settings.providers,
             idle_timeout_seconds=settings.session_idle_timeout_seconds,
+            busy_timeout_seconds=settings.session_busy_timeout_seconds,
+            max_queue_size=settings.max_queue_size,
             output_callback=self._send_output,
             request_started_callback=self._start_typing_indicator,
             cleanup_callback=self._cleanup_chat,
@@ -129,6 +131,7 @@ class BridgeBot:
             return
 
         chat_id = int(chat.id)
+        self._session_manager.register_activity(chat_id)
         user_id = int(user.id) if user else None
         text = raw_text.strip()
 
