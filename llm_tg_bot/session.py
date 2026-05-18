@@ -96,7 +96,6 @@ class SessionManager:
         provider_name: str,
     ) -> SendResult:
         record = await self.get_or_start_session(chat_id, provider_name)
-        self._sweep_completed_task(record)
         queued_ahead = record.queued_count + (1 if record.is_busy else 0)
         record.pending_prompts.append(text)
         record.last_activity = time.monotonic()
@@ -162,7 +161,6 @@ class SessionManager:
         queue_list = list(record.pending_prompts)
         lines = [f"Queue ({len(queue_list)} item(s)):"]
         for index, prompt in enumerate(queue_list, 1):
-            # Truncate long prompts for display
             single_line_prompt = _WHITESPACE_RE.sub(" ", prompt).strip()
             display_prompt = (
                 single_line_prompt[:100] + "..."
@@ -195,43 +193,17 @@ class SessionManager:
             )
 
     def _ensure_active_request(self, record: SessionRecord) -> bool:
-        self._sweep_completed_task(record)
         if record.is_busy or not record.pending_prompts:
             return False
 
         prompt = record.pending_prompts.popleft()
-        task = asyncio.create_task(self._run_request(record, prompt))
-        record.active_task = task
-        task.add_done_callback(
-            lambda completed_task: self._on_request_done(record, completed_task)
-        )
+        record.active_task = asyncio.create_task(self._run_request(record, prompt))
         if self._request_started_callback is not None:
-            self._request_started_callback(record.chat_id, task)
+            self._request_started_callback(record.chat_id, record.active_task)
         return True
 
-    def _on_request_done(
-        self,
-        record: SessionRecord,
-        completed_task: asyncio.Task[None],
-    ) -> None:
-        if record.active_task is completed_task:
-            record.active_task = None
-
-        if self._records.get(record.chat_id) is not record:
-            return
-
-        self._ensure_active_request(record)
-
-    @staticmethod
-    def _sweep_completed_task(record: SessionRecord) -> None:
-        if record.active_task is not None and record.active_task.done():
-            record.active_task = None
-
     async def _cancel_active_request(self, record: SessionRecord) -> bool:
-        self._sweep_completed_task(record)
-        had_active_request = (
-            record.active_task is not None or record.active_process is not None
-        )
+        had_active_request = record.is_busy
 
         if record.active_process is not None:
             await terminate_process(record.active_process)
@@ -240,9 +212,7 @@ class SessionManager:
             record.active_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await record.active_task
-            record.active_task = None
 
-        record.active_process = None
         return had_active_request
 
     def _provider_for_session(
@@ -296,3 +266,6 @@ class SessionManager:
             )
         finally:
             record.active_process = None
+            record.active_task = None
+            if self._records.get(record.chat_id) is record:
+                self._ensure_active_request(record)

@@ -52,87 +52,98 @@ class ProviderAdapter(ABC):
         raise NotImplementedError
 
 
-class ClaudeAdapter(ProviderAdapter):
+class JsonAdapter(ProviderAdapter):
+    text_field: str
+
+    def prepare_request(
+        self,
+        prompt: str,
+        context: RequestContext,
+        *,
+        skip_git_repo_check: bool = False,
+    ) -> PreparedRequest:
+        del skip_git_repo_check
+        command = [self.executable]
+        self._add_base_args(command)
+        
+        if context.session_id:
+            command.extend(["--resume", context.session_id])
+        elif context.is_followup:
+            self._add_followup_args(command)
+            
+        command.extend(["-p", prompt] if "-p" not in command else [prompt])
+        if "--output-format" not in command:
+            command.extend(["--output-format", "json"])
+            
+        return PreparedRequest(command=tuple(command))
+
+    def build_response(
+        self,
+        stdout_text: str,
+        stderr_text: str,
+        return_code: int,
+        output_file: Path | None,
+    ) -> ProviderResponse:
+        del output_file
+        parsed = self._parse_json(stdout_text) if return_code == 0 else None
+        primary_text = (
+            parsed.text if parsed is not None else _clean_output_text(stdout_text)
+        )
+        return ProviderResponse(
+            text=_build_response(primary_text, stderr_text, return_code),
+            session_id=parsed.session_id if parsed is not None else None,
+        )
+
+    def _add_base_args(self, command: list[str]) -> None:
+        pass
+
+    def _add_followup_args(self, command: list[str]) -> None:
+        pass
+
+    def _parse_json(self, stdout_text: str) -> _ProviderJsonResult | None:
+        cleaned = _clean_output_text(stdout_text)
+        if not cleaned:
+            return None
+
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        result = payload.get(self.text_field)
+        text = result if isinstance(result, str) else cleaned
+        session_id = payload.get("session_id")
+        return _ProviderJsonResult(
+            text=_clean_output_text(text),
+            session_id=session_id if isinstance(session_id, str) and session_id else None,
+        )
+
+
+class ClaudeAdapter(JsonAdapter):
     name = "claude"
     executable = "claude"
+    text_field = "result"
 
-    def prepare_request(
-        self,
-        prompt: str,
-        context: RequestContext,
-        *,
-        skip_git_repo_check: bool = False,
-    ) -> PreparedRequest:
-        del skip_git_repo_check
-        command = [
-            self.executable,
-            "-p",
-            "--output-format",
-            "json",
-            "--permission-mode",
-            "bypassPermissions",
-        ]
-        if context.session_id:
-            command.extend(["--resume", context.session_id])
-        elif context.is_followup:
-            command.append("--continue")
-        command.append(prompt)
-        return PreparedRequest(command=tuple(command))
+    def _add_base_args(self, command: list[str]) -> None:
+        command.extend(["-p", "--output-format", "json", "--permission-mode", "bypassPermissions"])
 
-    def build_response(
-        self,
-        stdout_text: str,
-        stderr_text: str,
-        return_code: int,
-        output_file: Path | None,
-    ) -> ProviderResponse:
-        del output_file
-        parsed = _parse_claude_json(stdout_text) if return_code == 0 else None
-        primary_text = (
-            parsed.text if parsed is not None else _clean_output_text(stdout_text)
-        )
-        return ProviderResponse(
-            text=_build_response(primary_text, stderr_text, return_code),
-            session_id=parsed.session_id if parsed is not None else None,
-        )
+    def _add_followup_args(self, command: list[str]) -> None:
+        command.append("--continue")
 
 
-class GeminiAdapter(ProviderAdapter):
+class GeminiAdapter(JsonAdapter):
     name = "gemini"
     executable = "gemini"
+    text_field = "response"
 
-    def prepare_request(
-        self,
-        prompt: str,
-        context: RequestContext,
-        *,
-        skip_git_repo_check: bool = False,
-    ) -> PreparedRequest:
-        del skip_git_repo_check
-        command = [self.executable, "--approval-mode", "yolo"]
-        if context.session_id:
-            command.extend(["--resume", context.session_id])
-        elif context.is_followup:
-            command.extend(["--resume", "latest"])
-        command.extend(["-p", prompt, "--output-format", "json"])
-        return PreparedRequest(command=tuple(command))
+    def _add_base_args(self, command: list[str]) -> None:
+        command.extend(["--approval-mode", "yolo"])
 
-    def build_response(
-        self,
-        stdout_text: str,
-        stderr_text: str,
-        return_code: int,
-        output_file: Path | None,
-    ) -> ProviderResponse:
-        del output_file
-        parsed = _parse_gemini_json(stdout_text) if return_code == 0 else None
-        primary_text = (
-            parsed.text if parsed is not None else _clean_output_text(stdout_text)
-        )
-        return ProviderResponse(
-            text=_build_response(primary_text, stderr_text, return_code),
-            session_id=parsed.session_id if parsed is not None else None,
-        )
+    def _add_followup_args(self, command: list[str]) -> None:
+        command.extend(["--resume", "latest"])
 
 
 class CodexAdapter(ProviderAdapter):
@@ -304,50 +315,6 @@ def _add_codex_repo_check_hint(text: str) -> str:
 class _ProviderJsonResult:
     text: str
     session_id: str | None
-
-
-def _parse_claude_json(stdout_text: str) -> _ProviderJsonResult | None:
-    cleaned = _clean_output_text(stdout_text)
-    if not cleaned:
-        return None
-
-    try:
-        payload = json.loads(cleaned)
-    except json.JSONDecodeError:
-        return None
-
-    if not isinstance(payload, dict):
-        return None
-
-    result = payload.get("result")
-    text = result if isinstance(result, str) else cleaned
-    session_id = payload.get("session_id")
-    return _ProviderJsonResult(
-        text=_clean_output_text(text),
-        session_id=session_id if isinstance(session_id, str) and session_id else None,
-    )
-
-
-def _parse_gemini_json(stdout_text: str) -> _ProviderJsonResult | None:
-    cleaned = _clean_output_text(stdout_text)
-    if not cleaned:
-        return None
-
-    try:
-        payload = json.loads(cleaned)
-    except json.JSONDecodeError:
-        return None
-
-    if not isinstance(payload, dict):
-        return None
-
-    response = payload.get("response")
-    text = response if isinstance(response, str) else cleaned
-    session_id = payload.get("session_id")
-    return _ProviderJsonResult(
-        text=_clean_output_text(text),
-        session_id=session_id if isinstance(session_id, str) and session_id else None,
-    )
 
 
 def get_provider_spec(providers: dict[str, ProviderSpec], provider_name: str) -> ProviderSpec:
