@@ -110,9 +110,11 @@ class GeminiAdapter(ProviderAdapter):
     ) -> PreparedRequest:
         del skip_git_repo_check
         command = [self.executable, "--approval-mode", "yolo"]
-        if context.is_followup:
+        if context.session_id:
+            command.extend(["--resume", context.session_id])
+        elif context.is_followup:
             command.extend(["--resume", "latest"])
-        command.extend(["-p", prompt, "--output-format", "text"])
+        command.extend(["-p", prompt, "--output-format", "json"])
         return PreparedRequest(command=tuple(command))
 
     def build_response(
@@ -123,12 +125,13 @@ class GeminiAdapter(ProviderAdapter):
         output_file: Path | None,
     ) -> ProviderResponse:
         del output_file
+        parsed = _parse_gemini_json(stdout_text) if return_code == 0 else None
+        primary_text = (
+            parsed.text if parsed is not None else _clean_output_text(stdout_text)
+        )
         return ProviderResponse(
-            text=_build_response(
-                _clean_output_text(stdout_text),
-                stderr_text,
-                return_code,
-            )
+            text=_build_response(primary_text, stderr_text, return_code),
+            session_id=parsed.session_id if parsed is not None else None,
         )
 
 
@@ -298,12 +301,12 @@ def _add_codex_repo_check_hint(text: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class _ClaudeJsonResult:
+class _ProviderJsonResult:
     text: str
     session_id: str | None
 
 
-def _parse_claude_json(stdout_text: str) -> _ClaudeJsonResult | None:
+def _parse_claude_json(stdout_text: str) -> _ProviderJsonResult | None:
     cleaned = _clean_output_text(stdout_text)
     if not cleaned:
         return None
@@ -319,7 +322,29 @@ def _parse_claude_json(stdout_text: str) -> _ClaudeJsonResult | None:
     result = payload.get("result")
     text = result if isinstance(result, str) else cleaned
     session_id = payload.get("session_id")
-    return _ClaudeJsonResult(
+    return _ProviderJsonResult(
+        text=_clean_output_text(text),
+        session_id=session_id if isinstance(session_id, str) and session_id else None,
+    )
+
+
+def _parse_gemini_json(stdout_text: str) -> _ProviderJsonResult | None:
+    cleaned = _clean_output_text(stdout_text)
+    if not cleaned:
+        return None
+
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    response = payload.get("response")
+    text = response if isinstance(response, str) else cleaned
+    session_id = payload.get("session_id")
+    return _ProviderJsonResult(
         text=_clean_output_text(text),
         session_id=session_id if isinstance(session_id, str) and session_id else None,
     )
