@@ -51,7 +51,6 @@ class GeminiSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_different_chats_get_distinct_gemini_session_ids(self) -> None:
-        # Currently Gemini doesn't return session_id, so this test might fail or show it's missing
         outputs = [
             json.dumps({"response": "first response", "session_id": "session-one"}),
             json.dumps({"response": "second response", "session_id": "session-two"}),
@@ -77,7 +76,40 @@ class GeminiSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
         # Current implementation uses --resume latest for followups, 
         # but here we are checking if it *would* use separate IDs if it could.
         
-        # In current implementation, first request for chat 2 will NOT have --resume
-        # but it ALSO won't have a session ID saved.
-        self.assertIsNone(first.record.provider_session_id)
-        self.assertIsNone(second.record.provider_session_id)
+        first_resume = _option_value(self.commands[0], "--resume")
+        second_resume = _option_value(self.commands[1], "--resume")
+
+        self.assertIsNone(first_resume)
+        self.assertIsNone(second_resume)
+        self.assertEqual(first.record.provider_session_id, "session-one")
+        self.assertEqual(second.record.provider_session_id, "session-two")
+
+    async def test_same_chat_reuses_explicit_gemini_session_id(self) -> None:
+        outputs = [
+            json.dumps({"response": "first response", "session_id": "session-one"}),
+            json.dumps({"response": "second response", "session_id": "session-one"}),
+        ]
+
+        async def fake_exec(*command, **kwargs):
+            del kwargs
+            self.commands.append(tuple(command))
+            stdout = outputs[len(self.commands) - 1].encode("utf-8")
+            return _FakeProcess(stdout=stdout, returncode=0)
+
+        with patch(
+            "llm_tg_bot.request_runner.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=fake_exec),
+        ):
+            first = await self.manager.send_text(1, "first", "gemini")
+            await first.record.active_task
+
+            second = await self.manager.send_text(1, "second", "gemini")
+            await second.record.active_task
+
+        self.assertEqual(len(self.commands), 2)
+        first_resume = _option_value(self.commands[0], "--resume")
+        second_resume = _option_value(self.commands[1], "--resume")
+
+        self.assertIsNone(first_resume)
+        self.assertEqual(second_resume, "session-one")
+        self.assertEqual(first.record.provider_session_id, "session-one")
