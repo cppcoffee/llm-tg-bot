@@ -22,6 +22,7 @@ class RequestExecutionResult:
     message: OutgoingMessage | None
     succeeded: bool
     session_id: str | None = None
+    raw_text: str | None = None
 
 
 async def run_provider_request(
@@ -30,6 +31,7 @@ async def run_provider_request(
     *,
     request_context: RequestContext,
     process_tracker: ProcessTracker | None = None,
+    previous_response_text: str | None = None,
 ) -> RequestExecutionResult:
     output_file = None
     process: asyncio.subprocess.Process | None = None
@@ -49,17 +51,22 @@ async def run_provider_request(
             process_tracker(process)
 
         stdout_bytes, stderr_bytes = await process.communicate()
+        return_code = process.returncode
+        assert return_code is not None
         response = provider.build_response(
             stdout_text=stdout_bytes.decode("utf-8", errors="replace"),
             stderr_text=stderr_bytes.decode("utf-8", errors="replace"),
-            return_code=process.returncode,
+            return_code=return_code,
             output_file=output_file,
+            prompt=prompt,
+            previous_response_text=previous_response_text,
         )
         return RequestExecutionResult(
             completed_at=time.monotonic(),
-            message=_response_message(response.text, process.returncode),
-            succeeded=process.returncode == 0,
+            message=_response_message(response.text, return_code),
+            succeeded=return_code == 0,
             session_id=response.session_id,
+            raw_text=response.raw_text,
         )
     except asyncio.CancelledError:
         if process and process.returncode is None:

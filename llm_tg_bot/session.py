@@ -29,6 +29,7 @@ class SessionRecord:
     last_activity: float = field(default_factory=time.monotonic)
     request_count: int = 0
     provider_session_id: str | None = None
+    last_response_text: str | None = None
     active_task: asyncio.Task[None] | None = None
     active_process: asyncio.subprocess.Process | None = None
     pending_prompts: deque[str] = field(default_factory=deque)
@@ -134,7 +135,7 @@ class SessionManager:
     async def stop_session(self, chat_id: int, announce: bool = True) -> bool:
         self._chat_last_activity.pop(chat_id, None)
         record = self._records.pop(chat_id, None)
-        
+
         if self._cleanup_callback:
             self._cleanup_callback(chat_id)
 
@@ -146,7 +147,7 @@ class SessionManager:
 
         if announce:
             await self._output_callback(chat_id, OutgoingMessage("[session stopped]\n"))
-        
+
         return True
 
     def status_text(self, chat_id: int) -> str:
@@ -195,32 +196,37 @@ class SessionManager:
             return
 
         now = time.monotonic()
-        
-        # 1. Clean up idle chats that don't even have a session
+
         idle_chats = [
-            chat_id for chat_id, last_act in self._chat_last_activity.items()
-            if chat_id not in self._records and now - last_act >= self._idle_timeout_seconds
+            chat_id
+            for chat_id, last_act in self._chat_last_activity.items()
+            if chat_id not in self._records
+            and now - last_act >= self._idle_timeout_seconds
         ]
         for chat_id in idle_chats:
             await self.stop_session(chat_id, announce=False)
 
-        # 2. Clean up idle or stuck sessions
         stale_chat_ids: list[tuple[int, bool]] = []
         for chat_id, record in self._records.items():
             self._ensure_active_request(record)
-            
-            # Use max(record.last_activity, self._chat_last_activity.get(chat_id, 0))?
-            # Actually record.last_activity is updated on request start/end.
-            
-            is_stuck = record.is_busy and (now - record.last_activity >= self._busy_timeout_seconds)
-            is_idle = not record.is_busy and (now - record.last_activity >= self._idle_timeout_seconds)
-            
+
+            is_stuck = record.is_busy and (
+                now - record.last_activity >= self._busy_timeout_seconds
+            )
+            is_idle = not record.is_busy and (
+                now - record.last_activity >= self._idle_timeout_seconds
+            )
+
             if is_stuck or is_idle:
                 stale_chat_ids.append((chat_id, is_stuck))
 
         for chat_id, was_stuck in stale_chat_ids:
             await self.stop_session(chat_id, announce=False)
-            msg = "[session closed due to timeout]\n" if was_stuck else "[session closed due to idle timeout]\n"
+            msg = (
+                "[session closed due to timeout]\n"
+                if was_stuck
+                else "[session closed due to idle timeout]\n"
+            )
             await self._output_callback(chat_id, OutgoingMessage(msg))
 
     def _ensure_active_request(self, record: SessionRecord) -> bool:
@@ -279,6 +285,7 @@ class SessionManager:
                 process_tracker=lambda process: self._track_active_process(
                     record, process
                 ),
+                previous_response_text=record.last_response_text,
             )
             record.last_activity = result.completed_at
             if result.succeeded:
@@ -286,6 +293,7 @@ class SessionManager:
                     record.provider_session_id = result.session_id
                 record.request_count += 1
             if result.message is not None:
+                record.last_response_text = result.raw_text or result.message.text
                 await self._output_callback(record.chat_id, result.message)
         except asyncio.CancelledError:
             raise
