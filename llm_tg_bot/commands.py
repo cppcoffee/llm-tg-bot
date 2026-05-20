@@ -59,11 +59,15 @@ class CommandHandler:
             "/help": Command(self._handle_help, "Show this message"),
             "/list": Command(self._handle_list, "List configured providers"),
             "/use": Command(self._handle_use, "Set preferred provider", "<provider>"),
-            "/new": Command(self._handle_new, "Choose or start a session", "[provider] [directory]"),
+            "/new": Command(
+                self._handle_new, "Choose or start a session", "[provider] [directory]"
+            ),
             "/status": Command(self._handle_status, "Show current session status"),
             "/queue": Command(self._handle_queue, "Show queued prompts"),
             "/stop": Command(self._handle_stop, "Stop the current session"),
-            "/cancel": Command(self._handle_cancel, "Cancel in-flight request or /new setup"),
+            "/cancel": Command(
+                self._handle_cancel, "Cancel in-flight request or /new setup"
+            ),
         }
 
     def cleanup_chat(self, chat_id: int) -> None:
@@ -97,7 +101,9 @@ class CommandHandler:
             await self._handle_pending_provider_choice(chat_id, pending, choice)
             return True
 
-        await self._handle_pending_directory_choice(chat_id, pending.provider_name, choice)
+        await self._handle_pending_directory_choice(
+            chat_id, pending.provider_name, choice
+        )
         return True
 
     def preferred_provider(self, chat_id: int) -> str:

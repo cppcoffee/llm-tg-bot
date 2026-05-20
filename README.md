@@ -1,10 +1,10 @@
 # llm-tg-bot
 
-A Python Telegram bot that bridges chat messages to local CLI agents like `codex`, `claude`, and `gemini`. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
+A Python Telegram bot that bridges chat messages to local CLI agents like `codex`, `claude`, `gemini`, and `agy`. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
 
 ## Features
 
-- **Multi-Provider Support**: Supports `codex`, `claude`, and `gemini` with per-chat logical sessions.
+- **Multi-Provider Support**: Supports `codex`, `claude`, `gemini`, and `agy` with per-chat logical sessions.
 - **Request Queueing**: Queues incoming messages when the provider is busy.
 - **Smart Formatting**: Converts Markdown to Telegram-safe HTML with automatic message splitting.
 - **Access Control**: User allowlist with numeric Telegram IDs.

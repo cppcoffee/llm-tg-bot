@@ -38,6 +38,7 @@ class ProviderAdapter(ABC):
         context: RequestContext,
         *,
         skip_git_repo_check: bool = False,
+        cwd: Path | None = None,
     ) -> PreparedRequest:
         raise NotImplementedError
 
@@ -61,6 +62,7 @@ class JsonAdapter(ProviderAdapter):
         context: RequestContext,
         *,
         skip_git_repo_check: bool = False,
+        cwd: Path | None = None,
     ) -> PreparedRequest:
         del skip_git_repo_check
         command = [self.executable]
@@ -146,6 +148,69 @@ class GeminiAdapter(JsonAdapter):
         command.extend(["--resume", "latest"])
 
 
+class AgyAdapter(ProviderAdapter):
+    name = "agy"
+    executable = "agy"
+
+    def prepare_request(
+        self,
+        prompt: str,
+        context: RequestContext,
+        *,
+        skip_git_repo_check: bool = False,
+        cwd: Path | None = None,
+    ) -> PreparedRequest:
+        del skip_git_repo_check
+        fd, temp_path = tempfile.mkstemp(prefix="llm-tg-bot-agy-", suffix=".log")
+        os.close(fd)
+        log_file = Path(temp_path)
+
+        command = [
+            self.executable,
+            "-p",
+            prompt,
+            "--dangerously-skip-permissions",
+            "--log-file",
+            str(log_file),
+            "--add-dir",
+            str(cwd.resolve()) if cwd else str(Path.cwd().resolve()),
+        ]
+
+        if context.session_id:
+            command.extend(["--conversation", context.session_id])
+        elif context.is_followup:
+            command.append("--continue")
+
+        return PreparedRequest(command=tuple(command), output_file=log_file)
+
+    def build_response(
+        self,
+        stdout_text: str,
+        stderr_text: str,
+        return_code: int,
+        output_file: Path | None,
+    ) -> ProviderResponse:
+        session_id = None
+        if output_file and output_file.exists():
+            try:
+                log_content = output_file.read_text(encoding="utf-8", errors="replace")
+                match = re.search(r"Created conversation ([a-zA-Z0-9\-]+)", log_content)
+                if match:
+                    session_id = match.group(1)
+                else:
+                    match = re.search(r"conversation=([a-zA-Z0-9\-]+)", log_content)
+                    if match:
+                        session_id = match.group(1)
+            except Exception:
+                pass
+
+        primary_text = _clean_output_text(stdout_text)
+        return ProviderResponse(
+            text=_build_response(primary_text, stderr_text, return_code),
+            session_id=session_id,
+        )
+
+
 class CodexAdapter(ProviderAdapter):
     name = "codex"
     executable = "codex"
@@ -156,6 +221,7 @@ class CodexAdapter(ProviderAdapter):
         context: RequestContext,
         *,
         skip_git_repo_check: bool = False,
+        cwd: Path | None = None,
     ) -> PreparedRequest:
         fd, temp_path = tempfile.mkstemp(prefix="llm-tg-bot-codex-", suffix=".txt")
         os.close(fd)
@@ -220,6 +286,7 @@ class ProviderSpec:
             prompt,
             context,
             skip_git_repo_check=self.skip_git_repo_check,
+            cwd=self.cwd, # Pass the spec cwd
         )
 
     def build_response(
@@ -248,6 +315,7 @@ _BUILTIN_ADAPTERS: tuple[ProviderAdapter, ...] = (
     CodexAdapter(),
     ClaudeAdapter(),
     GeminiAdapter(),
+    AgyAdapter(),
 )
 
 
