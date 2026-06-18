@@ -223,11 +223,39 @@ class AgyAdapter(ProviderAdapter):
         raw_stdout = _clean_output_text(stdout_text)
         primary_text = raw_stdout
         if return_code == 0:
-            primary_text = _extract_agy_latest_reply(
-                primary_text,
-                prompt=prompt,
-                previous_response_text=previous_response_text,
-            )
+            extracted_text = None
+            if session_id:
+                try:
+                    app_data_dir = Path("~/.gemini/antigravity-cli").expanduser()
+                    transcript_path = (
+                        app_data_dir
+                        / "brain"
+                        / session_id
+                        / ".system_generated"
+                        / "logs"
+                        / "transcript.jsonl"
+                    )
+                    if transcript_path.exists():
+                        lines = transcript_path.read_text(encoding="utf-8").splitlines()
+                        for line in reversed(lines):
+                            try:
+                                data = json.loads(line)
+                                if data.get("type") == "PLANNER_RESPONSE" and data.get("content"):
+                                    extracted_text = data["content"]
+                                    break
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            if extracted_text is not None:
+                primary_text = _clean_output_text(extracted_text)
+            else:
+                primary_text = _extract_agy_latest_reply(
+                    primary_text,
+                    prompt=prompt,
+                    previous_response_text=previous_response_text,
+                )
         return ProviderResponse(
             text=_build_response(primary_text, stderr_text, return_code),
             session_id=session_id,

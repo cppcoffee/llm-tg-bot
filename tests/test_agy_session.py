@@ -99,3 +99,41 @@ class AgySessionIsolationTests(BaseSessionTestCase):
         # last_response_text now stores the raw transcript for agy,
         # so the prefix-stripping in _extract_agy_latest_reply works correctly.
         self.assertEqual(self.manager._records[1].last_response_text, "apple\nbanana")
+
+    @patch("llm_tg_bot.providers.Path.expanduser")
+    def test_extract_from_transcript_file(self, mock_expanduser) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            mock_expanduser.return_value = tmp_path
+
+            # Setup transcript directory structure
+            session_id = "test-session-123"
+            transcript_dir = tmp_path / "brain" / session_id / ".system_generated" / "logs"
+            transcript_dir.mkdir(parents=True, exist_ok=True)
+
+            transcript_file = transcript_dir / "transcript.jsonl"
+            transcript_file.write_text(
+                '{"step_index":0,"type":"USER_INPUT","content":"hi"}\n'
+                '{"step_index":1,"type":"PLANNER_RESPONSE","content":"I will inspect things."}\n'
+                '{"step_index":2,"type":"PLANNER_RESPONSE","content":"The final answer is 42."}\n',
+                encoding="utf-8",
+            )
+
+            # Create a log file that contains the conversation ID
+            log_file = tmp_path / "agy-test.log"
+            log_file.write_text(f"Created conversation {session_id}\n", encoding="utf-8")
+
+            adapter = AgyAdapter()
+            response = adapter.build_response(
+                stdout_text="Thought process...\nThe final answer is 42.",
+                stderr_text="",
+                return_code=0,
+                output_file=log_file,
+                prompt="hi",
+            )
+
+            self.assertEqual(response.text, "The final answer is 42.")
+            self.assertEqual(response.session_id, session_id)
