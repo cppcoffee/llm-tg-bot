@@ -1,0 +1,29 @@
+[Unit]
+Description=Telegram bridge for local CLI agent workflows (llm-tg-bot)
+After=network.target
+
+[Service]
+Type=simple
+# Replace 'username' with your actual OS username (e.g., sharp)
+User=username
+Group=username
+
+# Set the working directory to the project root so it can find the .env file
+WorkingDirectory=/path/to/llm-tg-bot
+
+# Path to the executable in the virtual environment
+ExecStart=/path/to/llm-tg-bot/.venv/bin/llm-tg-bot
+
+# Automatic restart settings
+Restart=always
+RestartSec=5
+
+# Environment variables
+Environment=PYTHONUNBUFFERED=1
+# Include the virtual environment's bin folder and standard paths in PATH.
+# If your local CLI agents (like claude, gemini, agy) are installed in your user directory (e.g. ~/.local/bin), 
+# make sure to add that path to the PATH environment variable.
+Environment="PATH=/path/to/llm-tg-bot/.venv/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/home/username/.local/bin"
+
+[Install]
+WantedBy=multi-user.target
