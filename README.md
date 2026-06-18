@@ -43,7 +43,11 @@ Key variables in `.env`:
 
 ## Deployment
 
-For production, use a process manager like **Supervisor**. See `deploy/llm-tg-bot.supervisor.example` for a template.
+For production, you can use a process manager like **Supervisor** or **Systemd**.
+
+### Option A: Supervisor
+
+See `deploy/llm-tg-bot.supervisor.example` for a template.
 
 1. Install Supervisor: `sudo apt install supervisor`
 2. Copy the template: `sudo cp deploy/llm-tg-bot.supervisor.example /etc/supervisor/conf.d/llm-tg-bot.conf`
@@ -52,6 +56,24 @@ For production, use a process manager like **Supervisor**. See `deploy/llm-tg-bo
    ```bash
    sudo supervisorctl reread
    sudo supervisorctl update
+   ```
+
+### Option B: Systemd (Recommended)
+
+See `deploy/llm-tg-bot.service.example` for a service file template.
+
+1. Copy the template: `sudo cp deploy/llm-tg-bot.service.example /etc/systemd/system/llm-tg-bot.service`
+2. Edit the service file (update paths, `User`, `WorkingDirectory`, and ensure the `PATH` environment variable contains your virtual environment's bin folder and the directory of your local CLI agents like Claude, Gemini, or agy).
+3. Reload systemd daemon and enable/start the service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable llm-tg-bot.service
+   sudo systemctl start llm-tg-bot.service
+   ```
+4. View service status and logs:
+   ```bash
+   sudo systemctl status llm-tg-bot.service
+   sudo journalctl -u llm-tg-bot.service -f
    ```
 
 ## Telegram Commands
