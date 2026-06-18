@@ -110,9 +110,7 @@ class _TelegramHTMLRenderer(mistune.HTMLRenderer):
         return f"• {text}\n"
 
     def block_quote(self, text: str) -> str:
-        lines = text.strip().split("\n")
-        quoted = "\n".join(f"&gt; {line}" for line in lines)
-        return f"{quoted}\n"
+        return f"<blockquote>{text.strip()}</blockquote>\n"
 
     def thematic_break(self) -> str:
         return "────────\n"

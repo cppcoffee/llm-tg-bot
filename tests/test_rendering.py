@@ -32,3 +32,12 @@ class RenderingTests(unittest.TestCase):
 
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk.text) <= 4096 for chunk in chunks))
+
+    def test_blockquote_rendering(self) -> None:
+        text = "> This is a quote.\n> Spanning multiple lines."
+        chunks = build_message_chunks(
+            OutgoingMessage(text, render_mode=RenderMode.MARKDOWN),
+            4096,
+        )
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0].text, "<blockquote>This is a quote.\nSpanning multiple lines.</blockquote>\n")
