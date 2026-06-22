@@ -97,8 +97,8 @@ def _load_providers() -> dict[str, ProviderSpec]:
 
     if not providers:
         raise ValueError(
-            "No providers available. Install codex, claude, gemini, or agy "
-            "and ensure the executables are available in PATH."
+            "No providers available. Install codex, claude, gemini, agy, or "
+            "opencode and ensure the executables are available in PATH."
         )
 
     return providers

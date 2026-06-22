@@ -1,10 +1,10 @@
 # llm-tg-bot
 
-A Python Telegram bot that bridges chat messages to local CLI agents like `codex`, `claude`, `gemini`, and `agy`. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
+A Python Telegram bot that bridges chat messages to local CLI agents like `codex`, `claude`, `gemini`, `agy`, and `opencode`. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
 
 ## Features
 
-- **Multi-Provider Support**: Supports `codex`, `claude`, `gemini`, and `agy` with per-chat logical sessions.
+- **Multi-Provider Support**: Supports `codex`, `claude`, `gemini`, `agy`, and `opencode` with per-chat logical sessions.
 - **Request Queueing**: Queues incoming messages when the provider is busy.
 - **Smart Formatting**: Converts Markdown to Telegram-safe HTML with automatic message splitting.
 - **Access Control**: User allowlist with numeric Telegram IDs.
@@ -38,7 +38,7 @@ Key variables in `.env`:
 - `TELEGRAM_BOT_TOKENS`: Your bot's API token(s). Comma-separate multiple tokens for multi-bot support.
 - `TELEGRAM_ALLOWED_USER_IDS`: Comma-separated user IDs (use `*` for open access in dev).
 - `WORKDIR`: Shared root for providers. `/new` lets you select subdirectories.
-- `DEFAULT_PROVIDER`: Default CLI to use (e.g., `codex`).
+- `DEFAULT_PROVIDER`: Default CLI to use (e.g., `codex` or `opencode`).
 - `SESSION_IDLE_TIMEOUT_SECONDS`: Closes idle sessions (default: 60m).
 
 ## Deployment
@@ -89,3 +89,4 @@ See `deploy/llm-tg-bot.service.example` for a service file template.
 
 - **Permissions**: Providers run in "yolo" / auto-approve mode, inheriting the bot process's OS permissions. **Always run the bot as a normal, unprivileged user.**
 - **Codex**: Defaults to `--skip-git-repo-check`. Set `CODEX_SKIP_GIT_REPO_CHECK=0` to require valid Git trees.
+- **opencode**: Runs in headless mode via `opencode run --format json` with `--dangerously-skip-permissions`. Resumes sessions with `--session <id>`.

@@ -319,6 +319,56 @@ class CodexAdapter(ProviderAdapter):
         return ["--color", "never", *common]
 
 
+class OpencodeAdapter(ProviderAdapter):
+    name = "opencode"
+    executable = "opencode"
+
+    def prepare_request(
+        self,
+        prompt: str,
+        context: RequestContext,
+        *,
+        skip_git_repo_check: bool = False,
+        cwd: Path | None = None,
+    ) -> PreparedRequest:
+        del skip_git_repo_check
+        command: list[str] = [
+            self.executable,
+            "run",
+            "--format",
+            "json",
+            "--dangerously-skip-permissions",
+        ]
+        if context.session_id:
+            command.extend(["--session", context.session_id])
+        elif context.is_followup:
+            command.append("--continue")
+        if cwd:
+            command.extend(["--dir", str(cwd)])
+        command.append(prompt)
+        return PreparedRequest(command=tuple(command))
+
+    def build_response(
+        self,
+        stdout_text: str,
+        stderr_text: str,
+        return_code: int,
+        output_file: Path | None,
+        *,
+        prompt: str | None = None,
+        previous_response_text: str | None = None,
+    ) -> ProviderResponse:
+        del output_file, prompt, previous_response_text
+        session_id, primary_text = _parse_opencode_json_stream(stdout_text)
+        if return_code != 0 and not primary_text:
+            primary_text = _clean_output_text(stdout_text)
+        return ProviderResponse(
+            text=_build_response(primary_text, stderr_text, return_code),
+            session_id=session_id,
+            raw_text=_clean_output_text(stdout_text),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderSpec:
     adapter: ProviderAdapter
@@ -377,6 +427,7 @@ _BUILTIN_ADAPTERS: tuple[ProviderAdapter, ...] = (
     ClaudeAdapter(),
     GeminiAdapter(),
     AgyAdapter(),
+    OpencodeAdapter(),
 )
 
 
@@ -472,6 +523,48 @@ def _add_codex_repo_check_hint(text: str) -> str:
 class _ProviderJsonResult:
     text: str
     session_id: str | None
+
+
+def _parse_opencode_json_stream(stdout_text: str) -> tuple[str | None, str]:
+    """Parse an opencode `run --format json` NDJSON event stream.
+
+    Returns ``(session_id, concatenated_text)``. ``session_id`` is ``None``
+    when no event carried one. Text is the concatenation of every
+    ``{"type": "text"}`` part's ``text`` field, preserving order.
+    """
+    session_id: str | None = None
+    text_parts: list[str] = []
+
+    for raw_line in stdout_text.splitlines():
+        cleaned_line = raw_line.strip()
+        if not cleaned_line:
+            continue
+        try:
+            event = json.loads(cleaned_line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+
+        event_session = event.get("sessionID")
+        if (
+            session_id is None
+            and isinstance(event_session, str)
+            and event_session
+        ):
+            session_id = event_session
+
+        if event.get("type") != "text":
+            continue
+        part = event.get("part")
+        if not isinstance(part, dict):
+            continue
+        part_text = part.get("text")
+        if isinstance(part_text, str) and part_text:
+            text_parts.append(part_text)
+
+    primary_text = "\n".join(text_parts).strip()
+    return session_id, primary_text
 
 
 def get_provider_spec(
