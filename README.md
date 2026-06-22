@@ -1,10 +1,10 @@
 # llm-tg-bot
 
-A Python Telegram bot that bridges chat messages to local CLI agents like `codex`, `claude`, `gemini`, `agy`, and `opencode`. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
+A Python Telegram bot that bridges chat messages to local CLI agents like `codex`, `claude`, `agy`, and `opencode`. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
 
 ## Features
 
-- **Multi-Provider Support**: Supports `codex`, `claude`, `gemini`, `agy`, and `opencode` with per-chat logical sessions.
+- **Multi-Provider Support**: Supports `codex`, `claude`, `agy`, and `opencode` with per-chat logical sessions.
 - **Request Queueing**: Queues incoming messages when the provider is busy.
 - **Smart Formatting**: Converts Markdown to Telegram-safe HTML with automatic message splitting.
 - **Access Control**: User allowlist with numeric Telegram IDs.
@@ -63,7 +63,7 @@ See `deploy/llm-tg-bot.supervisor.example` for a template.
 See `deploy/llm-tg-bot.service.example` for a service file template.
 
 1. Copy the template: `sudo cp deploy/llm-tg-bot.service.example /etc/systemd/system/llm-tg-bot.service`
-2. Edit the service file (update paths, `User`, `WorkingDirectory`, and ensure the `PATH` environment variable contains your virtual environment's bin folder and the directory of your local CLI agents like Claude, Gemini, or agy).
+2. Edit the service file (update paths, `User`, `WorkingDirectory`, and ensure the `PATH` environment variable contains your virtual environment's bin folder and the directory of your local CLI agents like Claude, agy, or opencode).
 3. Reload systemd daemon and enable/start the service:
    ```bash
    sudo systemctl daemon-reload

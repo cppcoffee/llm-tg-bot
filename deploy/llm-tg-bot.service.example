@@ -21,7 +21,7 @@ RestartSec=5
 # Environment variables
 Environment=PYTHONUNBUFFERED=1
 # Include the virtual environment's bin folder and standard paths in PATH.
-# If your local CLI agents (like claude, gemini, agy) are installed in your user directory (e.g. ~/.local/bin), 
+# If your local CLI agents (like claude, agy, opencode) are installed in your user directory (e.g. ~/.local/bin), 
 # make sure to add that path to the PATH environment variable.
 Environment="PATH=/path/to/llm-tg-bot/.venv/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/home/username/.local/bin"
 

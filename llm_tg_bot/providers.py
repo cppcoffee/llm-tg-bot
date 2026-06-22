@@ -147,18 +147,6 @@ class ClaudeAdapter(JsonAdapter):
         command.append("--continue")
 
 
-class GeminiAdapter(JsonAdapter):
-    name = "gemini"
-    executable = "gemini"
-    text_field = "response"
-
-    def _add_base_args(self, command: list[str]) -> None:
-        command.extend(["--approval-mode", "yolo"])
-
-    def _add_followup_args(self, command: list[str]) -> None:
-        command.extend(["--resume", "latest"])
-
-
 class AgyAdapter(ProviderAdapter):
     name = "agy"
     executable = "agy"
@@ -425,7 +413,6 @@ _IGNORED_STDERR_PATTERNS = (
 _BUILTIN_ADAPTERS: tuple[ProviderAdapter, ...] = (
     CodexAdapter(),
     ClaudeAdapter(),
-    GeminiAdapter(),
     AgyAdapter(),
     OpencodeAdapter(),
 )
