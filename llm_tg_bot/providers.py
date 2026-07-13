@@ -57,96 +57,6 @@ class ProviderAdapter(ABC):
         raise NotImplementedError
 
 
-class JsonAdapter(ProviderAdapter):
-    text_field: str
-
-    def prepare_request(
-        self,
-        prompt: str,
-        context: RequestContext,
-        *,
-        skip_git_repo_check: bool = False,
-        cwd: Path | None = None,
-    ) -> PreparedRequest:
-        del skip_git_repo_check
-        command = [self.executable]
-        self._add_base_args(command)
-
-        if context.session_id:
-            command.extend(["--resume", context.session_id])
-        elif context.is_followup:
-            self._add_followup_args(command)
-
-        command.extend(["-p", prompt] if "-p" not in command else [prompt])
-        if "--output-format" not in command:
-            command.extend(["--output-format", "json"])
-
-        return PreparedRequest(command=tuple(command))
-
-    def build_response(
-        self,
-        stdout_text: str,
-        stderr_text: str,
-        return_code: int,
-        output_file: Path | None,
-        *,
-        prompt: str | None = None,
-        previous_response_text: str | None = None,
-    ) -> ProviderResponse:
-        del output_file, prompt, previous_response_text
-        parsed = self._parse_json(stdout_text) if return_code == 0 else None
-        primary_text = (
-            parsed.text if parsed is not None else _clean_output_text(stdout_text)
-        )
-        return ProviderResponse(
-            text=_build_response(primary_text, stderr_text, return_code),
-            session_id=parsed.session_id if parsed is not None else None,
-        )
-
-    def _add_base_args(self, command: list[str]) -> None:
-        pass
-
-    def _add_followup_args(self, command: list[str]) -> None:
-        pass
-
-    def _parse_json(self, stdout_text: str) -> _ProviderJsonResult | None:
-        cleaned = _clean_output_text(stdout_text)
-        if not cleaned:
-            return None
-
-        try:
-            payload = json.loads(cleaned)
-        except json.JSONDecodeError:
-            return None
-
-        if not isinstance(payload, dict):
-            return None
-
-        result = payload.get(self.text_field)
-        text = result if isinstance(result, str) else cleaned
-        session_id = payload.get("session_id")
-        return _ProviderJsonResult(
-            text=_clean_output_text(text),
-            session_id=session_id
-            if isinstance(session_id, str) and session_id
-            else None,
-        )
-
-
-class ClaudeAdapter(JsonAdapter):
-    name = "claude"
-    executable = "claude"
-    text_field = "result"
-
-    def _add_base_args(self, command: list[str]) -> None:
-        command.extend(
-            ["-p", "--output-format", "json", "--permission-mode", "bypassPermissions"]
-        )
-
-    def _add_followup_args(self, command: list[str]) -> None:
-        command.append("--continue")
-
-
 class AgyAdapter(ProviderAdapter):
     name = "agy"
     executable = "agy"
@@ -412,7 +322,6 @@ _IGNORED_STDERR_PATTERNS = (
 )
 _BUILTIN_ADAPTERS: tuple[ProviderAdapter, ...] = (
     CodexAdapter(),
-    ClaudeAdapter(),
     AgyAdapter(),
     OpencodeAdapter(),
 )
@@ -504,12 +413,6 @@ def _add_codex_repo_check_hint(text: str) -> str:
         "disabled the default bypass, set CODEX_SKIP_GIT_REPO_CHECK=1 to allow "
         "running outside a trusted Git worktree."
     )
-
-
-@dataclass(frozen=True, slots=True)
-class _ProviderJsonResult:
-    text: str
-    session_id: str | None
 
 
 def _parse_opencode_json_stream(stdout_text: str) -> tuple[str | None, str]:
