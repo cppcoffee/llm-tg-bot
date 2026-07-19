@@ -32,7 +32,10 @@ class SessionRecord:
     last_response_text: str | None = None
     active_task: asyncio.Task[None] | None = None
     active_process: asyncio.subprocess.Process | None = None
-    pending_prompts: deque[str] = field(default_factory=deque)
+    # ponytail: queue carries message_id so edits can locate the entry.
+    # None id = internally queued, not editable.
+    pending_prompts: deque[tuple[int | None, str]] = field(default_factory=deque)
+    active_message_id: int | None = None
 
     @property
     def is_busy(self) -> bool:
@@ -49,6 +52,13 @@ class SessionRecord:
 class SendResult:
     record: SessionRecord
     queued_ahead: int
+
+
+class EditOutcome:
+    UPDATED_QUEUED = "updated_queued"
+    RESTARTED_ACTIVE = "restarted_active"
+    NOT_FOUND = "not_found"
+    NO_SESSION = "no_session"
 
 
 class SessionManager:
@@ -104,17 +114,49 @@ class SessionManager:
         chat_id: int,
         text: str,
         provider_name: str,
+        *,
+        message_id: int | None = None,
     ) -> SendResult:
         record = await self.get_or_start_session(chat_id, provider_name)
         if record.queued_count >= self._max_queue_size:
             raise RuntimeError(f"Queue full ({self._max_queue_size} prompts max)")
 
         queued_ahead = record.queued_count + (1 if record.is_busy else 0)
-        record.pending_prompts.append(text)
+        record.pending_prompts.append((message_id, text))
         record.last_activity = time.monotonic()
         self.register_activity(chat_id)
         self._ensure_active_request(record)
         return SendResult(record=record, queued_ahead=queued_ahead)
+
+    async def edit_message(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+    ) -> str:
+        """Edit a queued or in-flight prompt by its originating message_id.
+
+        Returns one of EditOutcome.*.
+        """
+        self.register_activity(chat_id)
+        record = self._records.get(chat_id)
+        if record is None:
+            return EditOutcome.NO_SESSION
+
+        for index, (existing_id, _) in enumerate(record.pending_prompts):
+            if existing_id == message_id:
+                record.pending_prompts[index] = (message_id, text)
+                return EditOutcome.UPDATED_QUEUED
+
+        if record.active_message_id == message_id and record.is_busy:
+            record.pending_prompts.appendleft((message_id, text))
+            await self._cancel_active_request(record)
+            # _cancel_active_request clears active_task; _ensure_active_request
+            # runs in the cancelled task's finally block and will pick up the
+            # newly prepended prompt.
+            return EditOutcome.RESTARTED_ACTIVE
+
+        return EditOutcome.NOT_FOUND
 
     def has_session(self, chat_id: int) -> bool:
         return chat_id in self._records
@@ -180,7 +222,7 @@ class SessionManager:
 
         queue_list = list(record.pending_prompts)
         lines = [f"Queue ({len(queue_list)} item(s)):"]
-        for index, prompt in enumerate(queue_list, 1):
+        for index, (_, prompt) in enumerate(queue_list, 1):
             single_line_prompt = _WHITESPACE_RE.sub(" ", prompt).strip()
             display_prompt = (
                 single_line_prompt[:100] + "..."
@@ -233,8 +275,11 @@ class SessionManager:
         if record.is_busy or not record.pending_prompts:
             return False
 
-        prompt = record.pending_prompts.popleft()
-        record.active_task = asyncio.create_task(self._run_request(record, prompt))
+        message_id, prompt = record.pending_prompts.popleft()
+        record.active_message_id = message_id
+        record.active_task = asyncio.create_task(
+            self._run_request(record, prompt)
+        )
         if self._request_started_callback is not None:
             self._request_started_callback(record.chat_id, record.active_task)
         return True
@@ -306,5 +351,6 @@ class SessionManager:
         finally:
             record.active_process = None
             record.active_task = None
+            record.active_message_id = None
             if self._records.get(record.chat_id) is record:
                 self._ensure_active_request(record)

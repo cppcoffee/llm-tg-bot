@@ -5,7 +5,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
-from telegram import Bot, ReplyKeyboardMarkup, Update
+from telegram import Bot, Message, ReplyKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.error import Conflict, RetryAfter, TelegramError
 from telegram.request import HTTPXRequest
@@ -25,7 +25,7 @@ from llm_tg_bot.rendering import (
     RenderedChunk,
     build_message_chunks,
 )
-from llm_tg_bot.session import SessionManager
+from llm_tg_bot.session import EditOutcome, SessionManager
 
 logger = logging.getLogger(__name__)
 TelegramAPICall = Callable[[], Awaitable[object]]
@@ -120,6 +120,11 @@ class BridgeBot:
                 await self._bot.shutdown()
 
     async def _handle_update(self, update: Update) -> None:
+        edited = update.edited_message
+        if edited is not None:
+            await self._handle_edited_message(edited)
+            return
+
         message = update.effective_message
         chat = update.effective_chat
         user = update.effective_user
@@ -159,22 +164,48 @@ class BridgeBot:
                 except ValueError as exc:
                     await self._send_message(chat_id, f"Error: {exc}")
             else:
-                await self._forward_text(chat_id, text)
+                await self._forward_text(chat_id, text, message_id=message.message_id)
             return
 
-        await self._forward_text(chat_id, raw_text)
+        await self._forward_text(chat_id, raw_text, message_id=message.message_id)
+
+    async def _handle_edited_message(self, message: Message) -> None:
+        chat = message.chat
+        if chat is None:
+            return
+        raw_text = message.text or ""
+        if not raw_text.strip():
+            return
+
+        chat_id = int(chat.id)
+        self._session_manager.register_activity(chat_id)
+        user = message.from_user
+        user_id = int(user.id) if user else None
+        if not self._is_allowed_user(user_id):
+            return
+
+        outcome = await self._session_manager.edit_message(
+            chat_id, message.message_id, raw_text
+        )
+        if outcome == EditOutcome.UPDATED_QUEUED:
+            await self._send_message(chat_id, "[edited prompt updated in queue]")
+        elif outcome == EditOutcome.RESTARTED_ACTIVE:
+            await self._send_message(chat_id, "[edited prompt; restarting request]")
+        # NOT_FOUND / NO_SESSION: ignore silently (already answered or gone).
 
     def _active_or_default_provider(self, chat_id: int) -> str:
         return self._session_manager.active_provider_name(
             chat_id
         ) or self._command_handler.preferred_provider(chat_id)
 
-    async def _forward_text(self, chat_id: int, text: str) -> None:
+    async def _forward_text(
+        self, chat_id: int, text: str, *, message_id: int | None = None
+    ) -> None:
         provider_name = self._active_or_default_provider(chat_id)
         had_session = self._session_manager.has_session(chat_id)
         try:
             send_result = await self._session_manager.send_text(
-                chat_id, text, provider_name
+                chat_id, text, provider_name, message_id=message_id
             )
         except (FileNotFoundError, OSError, RuntimeError) as exc:
             logger.warning("Failed to deliver input for chat_id=%s: %s", chat_id, exc)

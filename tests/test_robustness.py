@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from pathlib import Path
 
-from llm_tg_bot.session import SessionManager
+from llm_tg_bot.session import SessionManager, EditOutcome
 from llm_tg_bot.providers import ProviderSpec, ProviderAdapter, PreparedRequest, ProviderResponse, RequestContext
 from llm_tg_bot.rendering import OutgoingMessage
 
@@ -104,3 +104,62 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
             # Cleanup
             if not future.done():
                 future.set_result(None)
+
+    async def test_edit_queued_prompt_replaces_text(self):
+        loop = asyncio.get_running_loop()
+        blocker = loop.create_future()
+
+        async def slow_req(*args, **kwargs):
+            await blocker
+            return None
+
+        with patch("llm_tg_bot.session.run_provider_request", side_effect=slow_req):
+            await self.manager.send_text(1, "p1", "mock", message_id=10)
+            await self.manager.send_text(1, "p2", "mock", message_id=11)
+
+            outcome = await self.manager.edit_message(1, 11, "p2-edited")
+            self.assertEqual(outcome, EditOutcome.UPDATED_QUEUED)
+
+            record = self.manager._records[1]
+            self.assertEqual(record.pending_prompts[0], (11, "p2-edited"))
+
+            blocker.set_result(None)
+            # Drain so background task finishes before teardown.
+            await asyncio.sleep(0)
+
+    async def test_edit_active_prompt_cancels_and_requeues(self):
+        loop = asyncio.get_running_loop()
+        blocker = loop.create_future()
+        cancelled = asyncio.Event()
+
+        async def slow_req(*args, **kwargs):
+            try:
+                await blocker
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return None
+
+        captured: list[str] = []
+
+        async def fast_req(provider, prompt, **kwargs):
+            captured.append(prompt)
+            return None
+
+        # First call blocks (the active prompt), subsequent calls finish fast.
+        side = [slow_req, fast_req]
+
+        async def dispatcher(*args, **kwargs):
+            fn = side.pop(0) if side else fast_req
+            return await fn(*args, **kwargs)
+
+        with patch("llm_tg_bot.session.run_provider_request", side_effect=dispatcher):
+            await self.manager.send_text(1, "p1", "mock", message_id=10)
+            # Yield once so the background task actually starts and reaches slow_req.
+            await asyncio.sleep(0)
+
+            outcome = await self.manager.edit_message(1, 10, "p1-edited")
+            self.assertEqual(outcome, EditOutcome.RESTARTED_ACTIVE)
+
+            self.assertTrue(cancelled.is_set(), "active request was not cancelled")
+            self.assertIn("p1-edited", captured)
