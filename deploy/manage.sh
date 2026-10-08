@@ -24,6 +24,7 @@ Usage: $(basename "$0") <command> [options]
 
 Commands:
   install              Create venv, install deps, set up and start the service
+  update               Pull latest source, reinstall deps, restart the service
   uninstall [--purge]  Stop and remove the service (--purge also deletes .venv)
   status               Show service status
   logs [args...]       Follow the service log (extra args go to journalctl)
@@ -123,6 +124,22 @@ setup_venv() {
 
 env_needs_editing() {
   grep -q "replace-me" "$PROJECT_DIR/.env"
+}
+
+require_installed() {
+  case "$BACKEND" in
+    systemd)    [[ -f "$UNIT_PATH" ]] || die "$SERVICE_NAME is not installed; run '$(basename "$0") install' first" ;;
+    supervisor) [[ -f "$SUPERVISOR_CONF" ]] || die "$SERVICE_NAME is not installed; run '$(basename "$0") install' first" ;;
+  esac
+}
+
+update_source() {
+  if git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "Pulling latest source ..."
+    as_user git -C "$PROJECT_DIR" pull --ff-only
+  else
+    echo "Not a git checkout; skipping source update."
+  fi
 }
 
 # --- systemd ----------------------------------------------------------------
@@ -243,6 +260,18 @@ do_install() {
   echo "Logs: $(basename "$0") logs"
 }
 
+do_update() {
+  resolve_user
+  require_installed
+  update_source
+  setup_venv
+  case "$BACKEND" in
+    systemd)    install_systemd ;;
+    supervisor) install_supervisor ;;
+  esac
+  do_status
+}
+
 do_uninstall() {
   resolve_user
   local purge=0
@@ -282,7 +311,7 @@ do_logs() {
 command="${1:-}"
 shift || true
 case "$command" in
-  install|uninstall|status|logs)
+  install|update|uninstall|status|logs)
     BACKEND="$(detect_backend)"
     require_backend_tools
     ;;
@@ -290,6 +319,7 @@ esac
 
 case "$command" in
   install)   do_install "$@" ;;
+  update)    do_update "$@" ;;
   uninstall) do_uninstall "$@" ;;
   status)    do_status ;;
   logs)      do_logs "$@" ;;

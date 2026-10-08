@@ -51,6 +51,7 @@ For production, you can use **Systemd** or **Supervisor**.
 
 ```bash
 ./deploy/manage.sh install          # venv + deps + service, then start
+./deploy/manage.sh update           # git pull + reinstall deps + restart the service
 ./deploy/manage.sh status           # systemctl status or supervisorctl status
 ./deploy/manage.sh logs             # journalctl -f or tail -f log/llm-tg-bot.log
 ./deploy/manage.sh uninstall        # stop + remove the service config (.env and .venv kept)
