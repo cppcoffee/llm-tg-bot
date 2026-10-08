@@ -36,6 +36,16 @@ A Python Telegram bot that bridges chat messages to local CLI agents like `codex
 
 The bot loads `.env` from the project root (the parent of the `llm_tg_bot` package), regardless of the current working directory. Existing environment variables take precedence; restart the bot after changing `.env`.
 
+Run only one polling instance per bot token. On macOS and Linux, a per-token file
+lock prevents duplicate starts by the same user sharing the same temporary
+directory, including starts from different project checkouts. Locks release when
+the process exits; leftover lock files do not need to be deleted. This does not
+prevent another host, container, user, or older version from polling the same
+token. If Telegram reports a polling conflict, the bot keeps its sessions and
+update offset and retries after at least 30 seconds. Stop the competing instance
+to restore reliable message delivery; deleting the webhook cannot stop another
+poller.
+
 Key variables in `.env`:
 
 - `TELEGRAM_BOT_TOKENS`: Your bot's API token(s). Comma-separate multiple tokens for multi-bot support.

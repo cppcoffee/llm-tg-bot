@@ -102,7 +102,19 @@ class BridgeBot:
                 }
                 if self._offset is not None:
                     request_kwargs["offset"] = self._offset
-                updates = await _poll_with_retry(self._bot, request_kwargs)
+                try:
+                    updates = await _poll_with_retry(self._bot, request_kwargs)
+                except Conflict as exc:
+                    delay = max(30, self._settings.poll_timeout_seconds)
+                    logger.warning(
+                        "Polling conflict for bot %s: %s. Stop other instances using "
+                        "this token (including other hosts). Retrying in %ds.",
+                        self._bot.id,
+                        exc,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
 
                 for update in updates:
                     self._offset = update.update_id + 1
@@ -367,25 +379,14 @@ class BridgeBot:
 
 
 @retry(
-    retry=retry_if_exception_type((RetryAfter, Conflict)),
+    retry=retry_if_exception_type(RetryAfter),
     wait=wait_random_exponential(multiplier=1, max=60),
     stop=stop_after_attempt(10),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 async def _poll_with_retry(bot: Bot, request_kwargs: dict) -> list[Update]:
-    try:
-        return await bot.get_updates(**request_kwargs)
-    except Conflict as exc:
-        logger.warning(
-            "Conflict on getUpdates: %s. Calling delete_webhook to clear stale connection.",
-            exc,
-        )
-        with contextlib.suppress(TelegramError):
-            await bot.delete_webhook(drop_pending_updates=False)
-        # Adding a small additional delay to avoid immediate retry-fight
-        await asyncio.sleep(1)
-        raise
+    return await bot.get_updates(**request_kwargs)
 
 
 def _control_keyboard() -> ReplyKeyboardMarkup:
