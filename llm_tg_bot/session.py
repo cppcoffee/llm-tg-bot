@@ -29,7 +29,6 @@ class SessionRecord:
     last_activity: float = field(default_factory=time.monotonic)
     request_count: int = 0
     provider_session_id: str | None = None
-    last_response_text: str | None = None
     active_task: asyncio.Task[None] | None = None
     active_process: asyncio.subprocess.Process | None = None
     # ponytail: queue carries message_id so edits can locate the entry.
@@ -202,7 +201,7 @@ class SessionManager:
         idle_seconds = int(time.monotonic() - record.last_activity)
         return (
             f"Active session: {record.provider.name}\n"
-            f"Command: {record.provider.display_command}\n"
+            f"Command: {record.provider.executable}\n"
             f"Workdir: {format_workdir(record.provider.cwd)}\n"
             f"Mode: headless request/response\n"
             f"Requests: {record.request_count}\n"
@@ -305,11 +304,7 @@ class SessionManager:
         provider = self._providers[provider_name]
         if cwd is None or cwd == provider.cwd:
             return provider
-        return ProviderSpec(
-            adapter=provider.adapter,
-            cwd=cwd,
-            skip_git_repo_check=provider.skip_git_repo_check,
-        )
+        return ProviderSpec(adapter=provider.adapter, cwd=cwd)
 
     def _track_active_process(
         self,
@@ -330,7 +325,6 @@ class SessionManager:
                 process_tracker=lambda process: self._track_active_process(
                     record, process
                 ),
-                previous_response_text=record.last_response_text,
             )
             record.last_activity = result.completed_at
             if result.succeeded:
@@ -338,7 +332,6 @@ class SessionManager:
                     record.provider_session_id = result.session_id
                 record.request_count += 1
             if result.message is not None:
-                record.last_response_text = result.raw_text or result.message.text
                 await self._output_callback(record.chat_id, result.message)
         except asyncio.CancelledError:
             raise

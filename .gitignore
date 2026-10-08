@@ -6,4 +6,3 @@ __pycache__/
 build/
 log/
 llm_tg_bot.egg-info/
-.antigravitycli

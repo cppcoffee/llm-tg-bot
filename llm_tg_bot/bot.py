@@ -115,7 +115,7 @@ class BridgeBot:
                 self._idle_cleanup_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._idle_cleanup_task
-            await self._stop_all_typing_tasks()
+            self._stop_all_typing_tasks()
             with contextlib.suppress(TelegramError):
                 await self._bot.shutdown()
 
@@ -233,7 +233,7 @@ class BridgeBot:
         return user_id is not None and user_id in self._settings.allowed_user_ids
 
     async def _send_output(self, chat_id: int, message: OutgoingMessage) -> None:
-        await self._stop_typing_indicator(chat_id)
+        self._cancel_typing_indicator(chat_id)
         try:
             await self._send_message(
                 chat_id,
@@ -261,14 +261,6 @@ class BridgeBot:
         if typing_task:
             typing_task.cancel()
 
-    async def _stop_typing_indicator(self, chat_id: int) -> None:
-        typing_task = self._typing_tasks.pop(chat_id, None)
-        if not typing_task:
-            return
-        typing_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await typing_task
-
     def _clear_typing_indicator(
         self,
         chat_id: int,
@@ -277,30 +269,19 @@ class BridgeBot:
         if self._typing_tasks.get(chat_id) is typing_task:
             self._typing_tasks.pop(chat_id, None)
 
-    async def _stop_all_typing_tasks(self) -> None:
-        chat_ids = list(self._typing_tasks)
-        for chat_id in chat_ids:
-            await self._stop_typing_indicator(chat_id)
+    def _stop_all_typing_tasks(self) -> None:
+        for chat_id in list(self._typing_tasks):
+            self._cancel_typing_indicator(chat_id)
 
     async def _typing_loop(
         self,
         chat_id: int,
         request_task: asyncio.Task[None],
     ) -> None:
-        try:
+        while not request_task.done():
             if not await self._send_chat_action(chat_id, ChatAction.TYPING):
                 return
-            while not request_task.done():
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(request_task),
-                        timeout=_TYPING_ACTION_INTERVAL_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    if not await self._send_chat_action(chat_id, ChatAction.TYPING):
-                        return
-        except asyncio.CancelledError:
-            raise
+            await asyncio.sleep(_TYPING_ACTION_INTERVAL_SECONDS)
 
     async def _send_message(
         self,

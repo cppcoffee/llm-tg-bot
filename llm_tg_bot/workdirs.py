@@ -19,7 +19,7 @@ def providers_text(providers: dict[str, ProviderSpec]) -> str:
         lines.append(f"Workdir root: {shared_workdir}")
     lines.append("Available providers:")
     for name, provider in provider_items:
-        line = f"- {name}: {provider.display_command}"
+        line = f"- {name}: {provider.executable}"
         if shared_workdir is None:
             line += f" | workdir={format_workdir(provider.cwd)}"
         lines.append(line)

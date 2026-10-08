@@ -68,16 +68,23 @@ def _split_markdown_blocks(md: str) -> list[str]:
     current: list[str] = []
     in_fence = False
     fence_indent = 0
+    fence_marker = ""
 
     for line in md.splitlines(keepends=True):
         stripped = line.lstrip()
         is_fence = stripped.startswith("```") or stripped.startswith("~~~")
         if is_fence:
             indent = len(line) - len(stripped)
+            marker = stripped[:3]
             if not in_fence:
                 in_fence = True
                 fence_indent = indent
-            elif indent == fence_indent and stripped[:3] == ("```" if "```" in line else "~~~"):
+                fence_marker = marker
+            elif (
+                indent == fence_indent
+                and marker == fence_marker
+                and stripped[3:].strip() == ""
+            ):
                 in_fence = False
             current.append(line)
             continue
@@ -143,9 +150,8 @@ def _render_markdown_chunks(text: str, limit: int) -> list[RenderedChunk]:
             buffer_len += len(block_html)
             continue
 
-        # Single block larger than limit: split by lines, each sub-chunk still
-        # valid HTML (paragraphs split into multiple <p>, code fences into
-        # multiple <pre>).
+        # Single block larger than limit: split by lines so each sub-chunk stays
+        # valid HTML (a code fence becomes several <pre> chunks).
         flush()
         is_code, lang, code = _is_code_block(block_md)
         if is_code:
@@ -158,32 +164,10 @@ def _render_markdown_chunks(text: str, limit: int) -> list[RenderedChunk]:
                 )
             continue
 
-        # Non-code block: split its markdown by blank-line sub-blocks (paragraphs,
-        # list items, etc.) and render each individually.
-        sub_split = _split_markdown_blocks(block_md)
-        # If the block has no internal sub-blocks (e.g. a single huge paragraph),
-        # fall back to plain-text splitting so we never exceed the limit.
-        if len(sub_split) <= 1:
-            flush()
-            for sub in split_plain_text(block_plain, limit):
-                chunks.append(RenderedChunk(text=sub, plain_text=sub))
-            continue
-        for sub_md in sub_split:
-            sub_html = _renderer(sub_md)
-            if len(sub_html) <= limit:
-                chunks.append(
-                    RenderedChunk(
-                        text=sub_html,
-                        plain_text=_plain_renderer(sub_md),
-                        parse_mode="HTML",
-                    )
-                )
-            else:
-                # Sub-block still too big; render and hard-split at line breaks.
-                for piece in _hard_split_html(sub_html, limit):
-                    chunks.append(
-                        RenderedChunk(text=piece, plain_text=piece, parse_mode="HTML")
-                    )
+        # Oversized non-code block (a single huge paragraph): the markdown split
+        # already removed every blank line, so fall back to plain-text splitting.
+        for sub in split_plain_text(block_plain, limit):
+            chunks.append(RenderedChunk(text=sub, plain_text=sub))
 
     flush()
     return chunks
@@ -208,23 +192,6 @@ def _split_code_by_lines(code: str, fence: str, limit: int) -> list[str]:
         chunks.append(render_md())
     return chunks
 
-
-def _hard_split_html(html: str, limit: int) -> list[str]:
-    """Split HTML at line boundaries, never exceeding limit."""
-    lines = html.splitlines(keepends=True)
-    chunks: list[str] = []
-    buf: list[str] = []
-    buf_len = 0
-    for line in lines:
-        if buf and buf_len + len(line) > limit:
-            chunks.append("".join(buf))
-            buf = []
-            buf_len = 0
-        buf.append(line)
-        buf_len += len(line)
-    if buf:
-        chunks.append("".join(buf))
-    return chunks
 
 class _TelegramHTMLRenderer(mistune.HTMLRenderer):
     def paragraph(self, text: str) -> str:

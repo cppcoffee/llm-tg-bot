@@ -82,22 +82,17 @@ def _load_bot_tokens() -> list[str]:
 
 def _load_providers() -> dict[str, ProviderSpec]:
     workdir = _optional_path_env("WORKDIR") or Path.cwd()
-    codex_skip_git_repo_check = _bool_env("CODEX_SKIP_GIT_REPO_CHECK", default=True)
     providers: dict[str, ProviderSpec] = {}
-    for adapter in builtin_adapters():
+    for adapter in builtin_adapters(
+        codex_skip_git_repo_check=_bool_env("CODEX_SKIP_GIT_REPO_CHECK", default=True)
+    ):
         if not _command_exists(adapter.executable):
             continue
-        providers[adapter.name] = ProviderSpec(
-            adapter=adapter,
-            cwd=workdir,
-            skip_git_repo_check=(
-                codex_skip_git_repo_check if adapter.name == "codex" else False
-            ),
-        )
+        providers[adapter.name] = ProviderSpec(adapter=adapter, cwd=workdir)
 
     if not providers:
         raise ValueError(
-            "No providers available. Install codex, agy, or "
+            "No providers available. Install codex, pi, or "
             "opencode and ensure the executables are available in PATH."
         )
 

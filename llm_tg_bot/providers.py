@@ -25,7 +25,6 @@ class RequestContext:
 class ProviderResponse:
     text: str
     session_id: str | None = None
-    raw_text: str | None = None
 
 
 class ProviderAdapter(ABC):
@@ -38,7 +37,6 @@ class ProviderAdapter(ABC):
         prompt: str,
         context: RequestContext,
         *,
-        skip_git_repo_check: bool = False,
         cwd: Path | None = None,
     ) -> PreparedRequest:
         raise NotImplementedError
@@ -50,127 +48,22 @@ class ProviderAdapter(ABC):
         stderr_text: str,
         return_code: int,
         output_file: Path | None,
-        *,
-        prompt: str | None = None,
-        previous_response_text: str | None = None,
     ) -> ProviderResponse:
         raise NotImplementedError
-
-
-class AgyAdapter(ProviderAdapter):
-    name = "agy"
-    executable = "agy"
-
-    def prepare_request(
-        self,
-        prompt: str,
-        context: RequestContext,
-        *,
-        skip_git_repo_check: bool = False,
-        cwd: Path | None = None,
-    ) -> PreparedRequest:
-        del skip_git_repo_check
-        fd, temp_path = tempfile.mkstemp(prefix="llm-tg-bot-agy-", suffix=".log")
-        os.close(fd)
-        log_file = Path(temp_path)
-
-        command = [
-            self.executable,
-            "-p",
-            prompt,
-            "--dangerously-skip-permissions",
-            "--log-file",
-            str(log_file),
-            "--print-timeout",
-            "1h",
-            "--add-dir",
-            str(cwd.resolve()) if cwd else str(Path.cwd().resolve()),
-        ]
-
-        if context.session_id:
-            command.extend(["--conversation", context.session_id])
-        elif context.is_followup:
-            command.append("--continue")
-
-        return PreparedRequest(command=tuple(command), output_file=log_file)
-
-    def build_response(
-        self,
-        stdout_text: str,
-        stderr_text: str,
-        return_code: int,
-        output_file: Path | None,
-        *,
-        prompt: str | None = None,
-        previous_response_text: str | None = None,
-    ) -> ProviderResponse:
-        session_id = None
-        if output_file and output_file.exists():
-            try:
-                log_content = output_file.read_text(encoding="utf-8", errors="replace")
-                match = re.search(r"Created conversation ([a-zA-Z0-9\-]+)", log_content)
-                if match:
-                    session_id = match.group(1)
-                else:
-                    match = re.search(r"conversation=([a-zA-Z0-9\-]+)", log_content)
-                    if match:
-                        session_id = match.group(1)
-            except Exception:
-                pass
-
-        raw_stdout = _clean_output_text(stdout_text)
-        primary_text = raw_stdout
-        if return_code == 0:
-            extracted_text = None
-            if session_id:
-                try:
-                    app_data_dir = Path("~/.gemini/antigravity-cli").expanduser()
-                    transcript_path = (
-                        app_data_dir
-                        / "brain"
-                        / session_id
-                        / ".system_generated"
-                        / "logs"
-                        / "transcript.jsonl"
-                    )
-                    if transcript_path.exists():
-                        lines = transcript_path.read_text(encoding="utf-8").splitlines()
-                        for line in reversed(lines):
-                            try:
-                                data = json.loads(line)
-                                if data.get("type") == "PLANNER_RESPONSE" and data.get("content"):
-                                    extracted_text = data["content"]
-                                    break
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-
-            if extracted_text is not None:
-                primary_text = _clean_output_text(extracted_text)
-            else:
-                primary_text = _extract_agy_latest_reply(
-                    primary_text,
-                    prompt=prompt,
-                    previous_response_text=previous_response_text,
-                )
-        return ProviderResponse(
-            text=_build_response(primary_text, stderr_text, return_code),
-            session_id=session_id,
-            raw_text=raw_stdout,
-        )
 
 
 class CodexAdapter(ProviderAdapter):
     name = "codex"
     executable = "codex"
 
+    def __init__(self, *, skip_git_repo_check: bool = True) -> None:
+        self._skip_git_repo_check = skip_git_repo_check
+
     def prepare_request(
         self,
         prompt: str,
         context: RequestContext,
         *,
-        skip_git_repo_check: bool = False,
         cwd: Path | None = None,
     ) -> PreparedRequest:
         fd, temp_path = tempfile.mkstemp(prefix="llm-tg-bot-codex-", suffix=".txt")
@@ -184,7 +77,7 @@ class CodexAdapter(ProviderAdapter):
         ]
         if context.is_followup:
             command.append("resume")
-        if skip_git_repo_check:
+        if self._skip_git_repo_check:
             command.append("--skip-git-repo-check")
         command.extend(self._request_tail(prompt, output_file, context.is_followup))
         return PreparedRequest(command=tuple(command), output_file=output_file)
@@ -195,11 +88,7 @@ class CodexAdapter(ProviderAdapter):
         stderr_text: str,
         return_code: int,
         output_file: Path | None,
-        *,
-        prompt: str | None = None,
-        previous_response_text: str | None = None,
     ) -> ProviderResponse:
-        del prompt, previous_response_text
         primary_text = _read_output_file(output_file) or _clean_output_text(stdout_text)
         return ProviderResponse(
             text=_build_response(
@@ -226,10 +115,8 @@ class OpencodeAdapter(ProviderAdapter):
         prompt: str,
         context: RequestContext,
         *,
-        skip_git_repo_check: bool = False,
         cwd: Path | None = None,
     ) -> PreparedRequest:
-        del skip_git_repo_check
         command: list[str] = [
             self.executable,
             "run",
@@ -252,18 +139,57 @@ class OpencodeAdapter(ProviderAdapter):
         stderr_text: str,
         return_code: int,
         output_file: Path | None,
-        *,
-        prompt: str | None = None,
-        previous_response_text: str | None = None,
     ) -> ProviderResponse:
-        del output_file, prompt, previous_response_text
+        del output_file
         session_id, primary_text = _parse_opencode_json_stream(stdout_text)
         if return_code != 0 and not primary_text:
             primary_text = _clean_output_text(stdout_text)
         return ProviderResponse(
             text=_build_response(primary_text, stderr_text, return_code),
             session_id=session_id,
-            raw_text=_clean_output_text(stdout_text),
+        )
+
+
+class PiAdapter(ProviderAdapter):
+    name = "pi"
+    executable = "pi"
+
+    def prepare_request(
+        self,
+        prompt: str,
+        context: RequestContext,
+        *,
+        cwd: Path | None = None,
+    ) -> PreparedRequest:
+        del cwd
+        command: list[str] = [
+            self.executable,
+            "--print",
+            "--mode",
+            "json",
+            "--approve",
+        ]
+        if context.session_id:
+            command.extend(["--session", context.session_id])
+        elif context.is_followup:
+            command.append("--continue")
+        command.append(prompt)
+        return PreparedRequest(command=tuple(command))
+
+    def build_response(
+        self,
+        stdout_text: str,
+        stderr_text: str,
+        return_code: int,
+        output_file: Path | None,
+    ) -> ProviderResponse:
+        del output_file
+        session_id, primary_text = _parse_pi_json_stream(stdout_text)
+        if return_code != 0 and not primary_text:
+            primary_text = _clean_output_text(stdout_text)
+        return ProviderResponse(
+            text=_build_response(primary_text, stderr_text, return_code),
+            session_id=session_id,
         )
 
 
@@ -271,7 +197,6 @@ class OpencodeAdapter(ProviderAdapter):
 class ProviderSpec:
     adapter: ProviderAdapter
     cwd: Path | None = None
-    skip_git_repo_check: bool = False
 
     @property
     def name(self) -> str:
@@ -281,17 +206,8 @@ class ProviderSpec:
     def executable(self) -> str:
         return self.adapter.executable
 
-    @property
-    def display_command(self) -> str:
-        return self.executable
-
     def prepare_request(self, prompt: str, context: RequestContext) -> PreparedRequest:
-        return self.adapter.prepare_request(
-            prompt,
-            context,
-            skip_git_repo_check=self.skip_git_repo_check,
-            cwd=self.cwd,  # Pass the spec cwd
-        )
+        return self.adapter.prepare_request(prompt, context, cwd=self.cwd)
 
     def build_response(
         self,
@@ -299,17 +215,12 @@ class ProviderSpec:
         stderr_text: str,
         return_code: int,
         output_file: Path | None,
-        *,
-        prompt: str | None = None,
-        previous_response_text: str | None = None,
     ) -> ProviderResponse:
         return self.adapter.build_response(
             stdout_text=stdout_text,
             stderr_text=stderr_text,
             return_code=return_code,
             output_file=output_file,
-            prompt=prompt,
-            previous_response_text=previous_response_text,
         )
 
 
@@ -320,15 +231,16 @@ _CODEX_REPO_CHECK_ERROR = (
 _IGNORED_STDERR_PATTERNS = (
     "WARNING: proceeding, even though we could not update PATH",
 )
-_BUILTIN_ADAPTERS: tuple[ProviderAdapter, ...] = (
-    CodexAdapter(),
-    AgyAdapter(),
-    OpencodeAdapter(),
-)
 
 
-def builtin_adapters() -> tuple[ProviderAdapter, ...]:
-    return _BUILTIN_ADAPTERS
+def builtin_adapters(
+    *, codex_skip_git_repo_check: bool = True
+) -> tuple[ProviderAdapter, ...]:
+    return (
+        CodexAdapter(skip_git_repo_check=codex_skip_git_repo_check),
+        OpencodeAdapter(),
+        PiAdapter(),
+    )
 
 
 def _build_response(primary_text: str, stderr_text: str, return_code: int) -> str:
@@ -372,34 +284,6 @@ def _clean_stderr_text(text: str) -> str:
         if not any(pattern in line for pattern in _IGNORED_STDERR_PATTERNS)
     ]
     return "\n".join(lines).strip()
-
-
-def _extract_agy_latest_reply(
-    transcript_text: str,
-    *,
-    prompt: str | None,
-    previous_response_text: str | None,
-) -> str:
-    current = transcript_text.strip()
-    if not current:
-        return ""
-
-    previous = (previous_response_text or "").strip()
-    if previous and current.startswith(previous):
-        suffix = current[len(previous) :].lstrip("\n")
-        if suffix:
-            return suffix.strip()
-
-    if prompt:
-        prompt_clean = prompt.strip()
-        if prompt_clean:
-            prompt_index = current.rfind(prompt_clean)
-            if prompt_index != -1:
-                suffix = current[prompt_index + len(prompt_clean) :].lstrip("\n")
-                if suffix:
-                    return suffix.strip()
-
-    return current
 
 
 def _add_codex_repo_check_hint(text: str) -> str:
@@ -454,6 +338,52 @@ def _parse_opencode_json_stream(stdout_text: str) -> tuple[str | None, str]:
             text_parts.append(part_text)
 
     primary_text = "\n".join(text_parts).strip()
+    return session_id, primary_text
+
+
+def _parse_pi_json_stream(stdout_text: str) -> tuple[str | None, str]:
+    """Parse a pi `--mode json` NDJSON event stream.
+
+    Returns ``(session_id, last_assistant_text)``. ``session_id`` comes from
+    the session header; text is the last non-empty assistant `message_end`.
+    """
+    session_id: str | None = None
+    primary_text = ""
+
+    for raw_line in stdout_text.splitlines():
+        cleaned_line = raw_line.strip()
+        if not cleaned_line:
+            continue
+        try:
+            event = json.loads(cleaned_line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+
+        if session_id is None and event.get("type") == "session":
+            event_id = event.get("id")
+            if isinstance(event_id, str) and event_id:
+                session_id = event_id
+
+        if event.get("type") != "message_end":
+            continue
+        message = event.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        text = "\n".join(
+            block["text"]
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ).strip()
+        if text:
+            primary_text = text
+
     return session_id, primary_text
 
 
