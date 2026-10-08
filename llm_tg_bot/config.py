@@ -34,7 +34,7 @@ class Settings(BaseModel, frozen=True):
 
 
 def load_settings() -> Settings:
-    load_dotenv()
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
     bot_tokens = _load_bot_tokens()
     providers = _load_providers()

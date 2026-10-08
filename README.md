@@ -34,7 +34,10 @@ A Python Telegram bot that bridges chat messages to local CLI agents like `codex
 
 ## Configuration
 
+The bot loads `.env` from the project root (the parent of the `llm_tg_bot` package), regardless of the current working directory. Existing environment variables take precedence; restart the bot after changing `.env`.
+
 Key variables in `.env`:
+
 - `TELEGRAM_BOT_TOKENS`: Your bot's API token(s). Comma-separate multiple tokens for multi-bot support.
 - `TELEGRAM_ALLOWED_USER_IDS`: Comma-separated user IDs (use `*` for open access in dev).
 - `WORKDIR`: Shared root for providers. `/new` lets you select subdirectories.
