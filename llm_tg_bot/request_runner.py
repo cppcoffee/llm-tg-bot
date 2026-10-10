@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from llm_tg_bot.providers import ProviderSpec, RequestContext
+from llm_tg_bot.providers import PiProvider
 from llm_tg_bot.rendering import OutgoingMessage, RenderMode
 
 logger = logging.getLogger(__name__)
@@ -21,24 +20,21 @@ class RequestExecutionResult:
     completed_at: float
     message: OutgoingMessage | None
     succeeded: bool
-    session_id: str | None = None
 
 
 async def run_provider_request(
-    provider: ProviderSpec,
+    provider: PiProvider,
     prompt: str,
     *,
-    request_context: RequestContext,
+    session_id: str,
     process_tracker: ProcessTracker | None = None,
 ) -> RequestExecutionResult:
-    output_file = None
     process: asyncio.subprocess.Process | None = None
     try:
-        request = provider.prepare_request(prompt, context=request_context)
-        output_file = request.output_file
-        logger.info("Running provider=%s command=%s", provider.name, request.command)
+        command = provider.prepare_request(prompt, session_id)
+        logger.info("Running provider=%s command=%s", provider.name, command)
         process = await asyncio.create_subprocess_exec(
-            *request.command,
+            *command,
             cwd=str(provider.cwd) if provider.cwd else None,
             env=_child_environment(),
             stdin=asyncio.subprocess.DEVNULL,
@@ -55,22 +51,17 @@ async def run_provider_request(
             stdout_text=stdout_bytes.decode("utf-8", errors="replace"),
             stderr_text=stderr_bytes.decode("utf-8", errors="replace"),
             return_code=return_code,
-            output_file=output_file,
         )
         return RequestExecutionResult(
             completed_at=time.monotonic(),
-            message=_response_message(response.text, return_code),
+            message=_response_message(response, return_code),
             succeeded=return_code == 0,
-            session_id=response.session_id,
         )
     except asyncio.CancelledError:
         if process and process.returncode is None:
             await terminate_process(process)
         raise
     finally:
-        if output_file:
-            with contextlib.suppress(FileNotFoundError):
-                output_file.unlink()
         if process_tracker is not None:
             process_tracker(None)
 

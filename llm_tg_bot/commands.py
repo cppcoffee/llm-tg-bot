@@ -8,12 +8,11 @@ from pathlib import Path
 from telegram import ReplyKeyboardMarkup
 
 from llm_tg_bot.config import Settings
-from llm_tg_bot.providers import get_provider_spec
 from llm_tg_bot.session import SessionManager
 from llm_tg_bot.workdirs import (
     directory_choices,
     directory_prompt,
-    providers_text,
+    provider_text,
     resolve_workdir_choice,
 )
 
@@ -36,11 +35,6 @@ class Command:
     usage: str = ""
 
 
-@dataclass(slots=True)
-class PendingNewSession:
-    provider_name: str | None = None
-
-
 class CommandHandler:
     def __init__(
         self,
@@ -53,14 +47,12 @@ class CommandHandler:
         self._session_manager = session_manager
         self._send_message = send_message
         self._keyboard_factory = keyboard_factory
-        self._preferred_provider_by_chat: dict[int, str] = {}
-        self._pending_new_session_by_chat: dict[int, PendingNewSession] = {}
+        self._pending_new_session_by_chat: set[int] = set()
         self._command_handlers: dict[str, Command] = {
             "/help": Command(self._handle_help, "Show this message"),
-            "/list": Command(self._handle_list, "List configured providers"),
-            "/use": Command(self._handle_use, "Set preferred provider", "<provider>"),
+            "/list": Command(self._handle_list, "Show provider and workdir root"),
             "/new": Command(
-                self._handle_new, "Choose or start a session", "[provider] [directory]"
+                self._handle_new, "Start a new session", "[directory]"
             ),
             "/status": Command(self._handle_status, "Show current session status"),
             "/queue": Command(self._handle_queue, "Show queued prompts"),
@@ -71,8 +63,7 @@ class CommandHandler:
         }
 
     def cleanup_chat(self, chat_id: int) -> None:
-        self._preferred_provider_by_chat.pop(chat_id, None)
-        self._pending_new_session_by_chat.pop(chat_id, None)
+        self._pending_new_session_by_chat.discard(chat_id)
 
     async def handle(self, chat_id: int, text: str) -> None:
         parts = text.split(maxsplit=1)
@@ -92,60 +83,44 @@ class CommandHandler:
         return bool(stripped) and command_name(stripped) in self._command_handlers
 
     async def handle_pending_input(self, chat_id: int, text: str) -> bool:
-        pending = self._pending_new_session_by_chat.get(chat_id)
-        if pending is None:
+        if chat_id not in self._pending_new_session_by_chat:
             return False
 
-        choice = text.strip()
-        if pending.provider_name is None:
-            await self._handle_pending_provider_choice(chat_id, pending, choice)
-            return True
-
-        await self._handle_pending_directory_choice(
-            chat_id, pending.provider_name, choice
-        )
+        await self._handle_pending_directory_choice(chat_id, text.strip())
         return True
-
-    def preferred_provider(self, chat_id: int) -> str:
-        return self._preferred_provider_by_chat.get(
-            chat_id, self._settings.default_provider
-        )
 
     async def _handle_help(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
         await self._send_message(
             chat_id,
-            self._help_text(chat_id),
+            self._help_text(),
             reply_markup=self._keyboard_factory(),
         )
 
     async def _handle_list(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
-        await self._send_message(chat_id, providers_text(self._settings.providers))
-
-    async def _handle_use(self, chat_id: int, raw_arg: str) -> None:
-        if not raw_arg:
-            await self._send_message(chat_id, "Usage: /use <provider>")
-            return
-        await self._set_preferred_provider(chat_id, raw_arg.lower())
+        await self._send_message(chat_id, provider_text(self._settings.provider))
 
     async def _handle_new(self, chat_id: int, raw_arg: str) -> None:
-        if not raw_arg:
+        if not raw_arg.strip():
             await self._begin_new_session(chat_id)
             return
 
-        provider_name, directory_choice = self._parse_new_arguments(chat_id, raw_arg)
-        if directory_choice is None:
-            await self._begin_new_session(chat_id, provider_name=provider_name)
+        try:
+            tokens = shlex.split(raw_arg)
+        except ValueError as exc:
+            raise ValueError(f"Invalid /new arguments: {exc}") from exc
+
+        directory_choice = " ".join(tokens)
+        if not directory_choice:
+            await self._begin_new_session(chat_id)
             return
 
-        await self._start_session_from_choice(chat_id, provider_name, directory_choice)
+        await self._start_session_from_choice(chat_id, directory_choice)
 
     async def _handle_status(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
-        preferred = self.preferred_provider(chat_id)
-        status = self._session_manager.status_text(chat_id)
-        await self._send_message(chat_id, f"Preferred provider: {preferred}\n{status}")
+        await self._send_message(chat_id, self._session_manager.status_text(chat_id))
 
     async def _handle_queue(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
@@ -154,7 +129,7 @@ class CommandHandler:
 
     async def _handle_stop(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
-        self._pending_new_session_by_chat.pop(chat_id, None)
+        self._pending_new_session_by_chat.discard(chat_id)
         stopped = await self._session_manager.stop_session(chat_id, announce=False)
         await self._send_message(
             chat_id,
@@ -164,9 +139,8 @@ class CommandHandler:
 
     async def _handle_cancel(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
-        selection_cancelled = (
-            self._pending_new_session_by_chat.pop(chat_id, None) is not None
-        )
+        selection_cancelled = chat_id in self._pending_new_session_by_chat
+        self._pending_new_session_by_chat.discard(chat_id)
         interrupted = await self._session_manager.interrupt(chat_id)
         await self._send_message(
             chat_id,
@@ -177,161 +151,57 @@ class CommandHandler:
             reply_markup=self._keyboard_factory(),
         )
 
-    async def _handle_pending_provider_choice(
-        self,
-        chat_id: int,
-        pending: PendingNewSession,
-        choice: str,
-    ) -> None:
-        provider_name = choice.lower()
-        if provider_name not in self._settings.providers:
-            await self._send_message(
-                chat_id,
-                (
-                    f"Unknown provider {choice!r}. "
-                    "Choose one of the configured providers or send /cancel."
-                ),
-                reply_markup=self._provider_keyboard(),
-            )
-            return
-
-        pending.provider_name = provider_name
-        await self._send_message(
-            chat_id,
-            self._directory_prompt(provider_name),
-            reply_markup=self._directory_keyboard(provider_name),
-        )
-
-    async def _handle_pending_directory_choice(
-        self,
-        chat_id: int,
-        provider_name: str,
-        choice: str,
-    ) -> None:
+    async def _handle_pending_directory_choice(self, chat_id: int, choice: str) -> None:
         try:
             await self._start_session_from_choice(
-                chat_id,
-                provider_name,
-                choice,
-                show_keyboard=False,
+                chat_id, choice, show_keyboard=False
             )
         except ValueError as exc:
             await self._send_message(
                 chat_id,
-                f"Error: {exc}\n\n{self._directory_prompt(provider_name)}",
-                reply_markup=self._directory_keyboard(provider_name),
+                f"Error: {exc}\n\n{self._directory_prompt()}",
+                reply_markup=self._directory_keyboard(),
             )
 
-    async def _set_preferred_provider(self, chat_id: int, provider_name: str) -> None:
-        get_provider_spec(self._settings.providers, provider_name)
-        self._preferred_provider_by_chat[chat_id] = provider_name
+    async def _begin_new_session(self, chat_id: int) -> None:
+        self._pending_new_session_by_chat.add(chat_id)
         await self._send_message(
             chat_id,
-            f"Preferred provider set to {provider_name}. "
-            "Use /new to restart the session with this provider.",
-            reply_markup=self._keyboard_factory(),
-        )
-
-    async def _begin_new_session(
-        self,
-        chat_id: int,
-        provider_name: str | None = None,
-    ) -> None:
-        if provider_name is not None:
-            get_provider_spec(self._settings.providers, provider_name)
-            self._pending_new_session_by_chat[chat_id] = PendingNewSession(
-                provider_name=provider_name
-            )
-            await self._send_message(
-                chat_id,
-                self._directory_prompt(provider_name),
-                reply_markup=self._directory_keyboard(provider_name),
-            )
-            return
-
-        preferred = self.preferred_provider(chat_id)
-        self._pending_new_session_by_chat[chat_id] = PendingNewSession()
-        await self._send_message(
-            chat_id,
-            (
-                "Select provider for the new session.\n"
-                f"Current preferred provider: {preferred}\n"
-                "Send /cancel to abort."
-            ),
-            reply_markup=self._provider_keyboard(),
+            self._directory_prompt(),
+            reply_markup=self._directory_keyboard(),
         )
 
     async def _start_session_from_choice(
         self,
         chat_id: int,
-        provider_name: str,
         directory_choice: str,
         *,
         show_keyboard: bool = True,
     ) -> None:
-        workdir = self._resolve_workdir_choice(provider_name, directory_choice)
-        await self._start_session(
-            chat_id,
-            provider_name,
-            workdir,
-            show_keyboard=show_keyboard,
-        )
+        workdir = self._resolve_workdir_choice(directory_choice)
+        await self._start_session(chat_id, workdir, show_keyboard=show_keyboard)
 
     async def _start_session(
         self,
         chat_id: int,
-        provider_name: str,
         workdir: Path,
         *,
         show_keyboard: bool = True,
     ) -> None:
         try:
-            await self._session_manager.start_session(
-                chat_id,
-                provider_name,
-                cwd=workdir,
-            )
+            await self._session_manager.start_session(chat_id, cwd=workdir)
         except (FileNotFoundError, OSError, RuntimeError) as exc:
-            raise ValueError(
-                f"Failed to start provider {provider_name}: {exc}"
-            ) from exc
-        self._pending_new_session_by_chat.pop(chat_id, None)
+            raise ValueError(f"Failed to start pi session: {exc}") from exc
+        self._pending_new_session_by_chat.discard(chat_id)
         await self._send_message(
             chat_id,
-            f"[session started: {provider_name} | workdir={workdir}]",
+            f"[session started: {self._settings.provider.name} | workdir={workdir}]",
             reply_markup=self._keyboard_factory() if show_keyboard else None,
         )
 
-    def _parse_new_arguments(
-        self,
-        chat_id: int,
-        raw_arg: str,
-    ) -> tuple[str, str | None]:
-        try:
-            tokens = shlex.split(raw_arg)
-        except ValueError as exc:
-            raise ValueError(f"Invalid /new arguments: {exc}") from exc
-
-        if not tokens:
-            return self.preferred_provider(chat_id), None
-
-        provider_candidate = tokens[0].lower()
-        if provider_candidate in self._settings.providers:
-            directory_choice = " ".join(tokens[1:]) or None
-            return provider_candidate, directory_choice
-
-        if len(tokens) > 1:
-            raise ValueError("Usage: /new [provider] [directory]")
-
-        return self.preferred_provider(chat_id), tokens[0]
-
-    def _provider_keyboard(self) -> ReplyKeyboardMarkup:
-        return self._choices_keyboard(sorted(self._settings.providers))
-
-    def _directory_keyboard(self, provider_name: str) -> ReplyKeyboardMarkup:
+    def _directory_keyboard(self) -> ReplyKeyboardMarkup:
         choices = directory_choices(
-            self._settings.providers,
-            provider_name,
+            self._settings.provider,
             button_limit=_DIRECTORY_BUTTON_LIMIT,
         )
         return self._choices_keyboard(choices)
@@ -347,15 +217,14 @@ class CommandHandler:
             one_time_keyboard=True,
         )
 
-    def _directory_prompt(self, provider_name: str) -> str:
+    def _directory_prompt(self) -> str:
         return directory_prompt(
-            self._settings.providers,
-            provider_name,
+            self._settings.provider,
             preview_limit=_DIRECTORY_BUTTON_LIMIT,
         )
 
-    def _resolve_workdir_choice(self, provider_name: str, value: str) -> Path:
-        return resolve_workdir_choice(self._settings.providers, provider_name, value)
+    def _resolve_workdir_choice(self, value: str) -> Path:
+        return resolve_workdir_choice(self._settings.provider, value)
 
     @staticmethod
     def _cancel_message(*, selection_cancelled: bool, interrupted: bool) -> str:
@@ -365,17 +234,16 @@ class CommandHandler:
             return "[new session setup cancelled]"
         return "[request cancelled]" if interrupted else "No active request."
 
-    def _help_text(self, chat_id: int) -> str:
+    def _help_text(self) -> str:
         lines = ["Commands:"]
         for cmd_name, cmd in sorted(self._command_handlers.items()):
             usage_part = f" {cmd.usage}" if cmd.usage else ""
             lines.append(f"{cmd_name}{usage_part} - {cmd.help}")
         lines.append("")
-        lines.append(f"Current preferred provider: {self.preferred_provider(chat_id)}")
         lines.append(
-            "Use /new with no arguments to choose a provider and a direct child "
-            "directory under the configured workdir.\n"
+            "Use /new with no arguments to choose a direct child directory "
+            "under the configured workdir.\n"
             "Plain text messages are forwarded as standalone CLI requests and "
-            "queued while the provider is busy."
+            "queued while pi is busy."
         )
         return "\n".join(lines)

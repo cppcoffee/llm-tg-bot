@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 
-from llm_tg_bot.providers import ProviderSpec, builtin_adapters
+from llm_tg_bot.providers import PiProvider
 
 
 class Settings(BaseModel, frozen=True):
@@ -16,7 +16,7 @@ class Settings(BaseModel, frozen=True):
     bot_tokens: list[str] = Field(min_length=1)
     allow_all_users: bool
     allowed_user_ids: frozenset[int] = frozenset()
-    default_provider: str
+    provider: PiProvider
     poll_timeout_seconds: int = Field(gt=0, default=30)
     telegram_connection_pool_size: int = Field(gt=0, default=8)
     telegram_pool_timeout_seconds: float = Field(gt=0, default=5.0)
@@ -25,7 +25,6 @@ class Settings(BaseModel, frozen=True):
     session_busy_timeout_seconds: int = Field(gt=0, default=7200)
     max_queue_size: int = Field(gt=0, default=10)
     log_level: str = "INFO"
-    providers: dict[str, ProviderSpec] = Field(default_factory=dict)
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -37,13 +36,7 @@ def load_settings() -> Settings:
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
     bot_tokens = _load_bot_tokens()
-    providers = _load_providers()
-    default_provider = os.getenv("DEFAULT_PROVIDER", "codex").strip().lower()
-    if default_provider not in providers:
-        raise ValueError(
-            f"DEFAULT_PROVIDER={default_provider!r} is not configured. "
-            f"Available providers: {', '.join(sorted(providers))}"
-        )
+    provider = _load_provider()
 
     allow_all_users, allowed_user_ids = _load_allowed_users(
         os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").strip()
@@ -53,7 +46,7 @@ def load_settings() -> Settings:
         bot_tokens=bot_tokens,
         allow_all_users=allow_all_users,
         allowed_user_ids=allowed_user_ids,
-        default_provider=default_provider,
+        provider=provider,
         poll_timeout_seconds=_int_env("POLL_TIMEOUT_SECONDS", 30),
         telegram_connection_pool_size=_int_env("TELEGRAM_CONNECTION_POOL_SIZE", 8),
         telegram_pool_timeout_seconds=_float_env("TELEGRAM_POOL_TIMEOUT_SECONDS", 5.0),
@@ -62,7 +55,6 @@ def load_settings() -> Settings:
         session_busy_timeout_seconds=_int_env("SESSION_BUSY_TIMEOUT_SECONDS", 7200),
         max_queue_size=_int_env("MAX_QUEUE_SIZE", 10),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
-        providers=providers,
     )
 
 
@@ -80,23 +72,14 @@ def _load_bot_tokens() -> list[str]:
     return list(dict.fromkeys(tokens))
 
 
-def _load_providers() -> dict[str, ProviderSpec]:
-    workdir = _optional_path_env("WORKDIR") or Path.cwd()
-    providers: dict[str, ProviderSpec] = {}
-    for adapter in builtin_adapters(
-        codex_skip_git_repo_check=_bool_env("CODEX_SKIP_GIT_REPO_CHECK", default=True)
-    ):
-        if not _command_exists(adapter.executable):
-            continue
-        providers[adapter.name] = ProviderSpec(adapter=adapter, cwd=workdir)
-
-    if not providers:
+def _load_provider() -> PiProvider:
+    if not _command_exists(PiProvider.executable):
         raise ValueError(
-            "No providers available. Install codex, pi, or "
-            "opencode and ensure the executables are available in PATH."
+            "pi executable not found in PATH. "
+            "Install pi and ensure it is available."
         )
 
-    return providers
+    return PiProvider(cwd=_optional_path_env("WORKDIR") or Path.cwd())
 
 
 def _load_allowed_users(raw_user_ids: str) -> tuple[bool, frozenset[int]]:
@@ -155,21 +138,6 @@ def _int_env(name: str, default: int) -> int:
 
 def _float_env(name: str, default: float) -> float:
     return float(os.getenv(name, str(default)))
-
-
-def _bool_env(name: str, default: bool) -> bool:
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-
-    normalized = raw_value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(
-        f"{name} must be one of: 1, 0, true, false, yes, no, on, off"
-    )
 
 
 def _command_exists(executable: str) -> bool:

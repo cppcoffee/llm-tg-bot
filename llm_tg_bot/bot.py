@@ -66,7 +66,7 @@ class BridgeBot:
             ),
         )
         self._session_manager = SessionManager(
-            providers=settings.providers,
+            provider=settings.provider,
             idle_timeout_seconds=settings.session_idle_timeout_seconds,
             busy_timeout_seconds=settings.session_busy_timeout_seconds,
             max_queue_size=settings.max_queue_size,
@@ -205,19 +205,13 @@ class BridgeBot:
             await self._send_message(chat_id, "[edited prompt; restarting request]")
         # NOT_FOUND / NO_SESSION: ignore silently (already answered or gone).
 
-    def _active_or_default_provider(self, chat_id: int) -> str:
-        return self._session_manager.active_provider_name(
-            chat_id
-        ) or self._command_handler.preferred_provider(chat_id)
-
     async def _forward_text(
         self, chat_id: int, text: str, *, message_id: int | None = None
     ) -> None:
-        provider_name = self._active_or_default_provider(chat_id)
         had_session = self._session_manager.has_session(chat_id)
         try:
             send_result = await self._session_manager.send_text(
-                chat_id, text, provider_name, message_id=message_id
+                chat_id, text, message_id=message_id
             )
         except (FileNotFoundError, OSError, RuntimeError) as exc:
             logger.warning("Failed to deliver input for chat_id=%s: %s", chat_id, exc)

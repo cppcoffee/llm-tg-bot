@@ -7,20 +7,14 @@ from unittest.mock import AsyncMock, patch
 from pathlib import Path
 
 from llm_tg_bot.session import SessionManager, EditOutcome
-from llm_tg_bot.providers import ProviderSpec, ProviderAdapter, PreparedRequest, ProviderResponse, RequestContext
+from llm_tg_bot.providers import PiProvider
 from llm_tg_bot.rendering import OutgoingMessage
+from llm_tg_bot.session import SessionManager, EditOutcome
 
-class MockAdapter(ProviderAdapter):
-    name = "mock"
-    executable = "mock"
-    def prepare_request(self, prompt, context, **kwargs):
-        return PreparedRequest(command=("mock", prompt))
-    def build_response(self, stdout, stderr, return_code, output_file):
-        return ProviderResponse(text=stdout)
 
 class RobustnessTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.provider = ProviderSpec(adapter=MockAdapter())
+        self.provider = PiProvider()
         self.outputs = []
         self.cleaned_chats = []
 
@@ -31,7 +25,7 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
             self.cleaned_chats.append(chat_id)
 
         self.manager = SessionManager(
-            providers={"mock": self.provider},
+            provider=self.provider,
             idle_timeout_seconds=1,
             busy_timeout_seconds=2,
             output_callback=output_callback,
@@ -50,14 +44,14 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("llm_tg_bot.session.run_provider_request", side_effect=slow_req):
             # First request starts immediately
-            await self.manager.send_text(1, "p1", "mock")
+            await self.manager.send_text(1, "p1")
             # Second and third are queued
-            await self.manager.send_text(1, "p2", "mock")
-            await self.manager.send_text(1, "p3", "mock")
+            await self.manager.send_text(1, "p2")
+            await self.manager.send_text(1, "p3")
             
             # Fourth should fail
             with self.assertRaises(RuntimeError) as cm:
-                await self.manager.send_text(1, "p4", "mock")
+                await self.manager.send_text(1, "p4")
             self.assertIn("Queue full", str(cm.exception))
             
             f1.set_result(None)
@@ -88,7 +82,7 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
             return AsyncMock() # Return something that doesn't break result handling
             
         with patch("llm_tg_bot.session.run_provider_request", side_effect=slow_request):
-            await self.manager.send_text(1, "slow", "mock")
+            await self.manager.send_text(1, "slow")
             record = self.manager._records[1]
             self.assertTrue(record.is_busy)
             
@@ -114,8 +108,8 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
             return None
 
         with patch("llm_tg_bot.session.run_provider_request", side_effect=slow_req):
-            await self.manager.send_text(1, "p1", "mock", message_id=10)
-            await self.manager.send_text(1, "p2", "mock", message_id=11)
+            await self.manager.send_text(1, "p1", message_id=10)
+            await self.manager.send_text(1, "p2", message_id=11)
 
             outcome = await self.manager.edit_message(1, 11, "p2-edited")
             self.assertEqual(outcome, EditOutcome.UPDATED_QUEUED)
@@ -154,7 +148,7 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
             return await fn(*args, **kwargs)
 
         with patch("llm_tg_bot.session.run_provider_request", side_effect=dispatcher):
-            await self.manager.send_text(1, "p1", "mock", message_id=10)
+            await self.manager.send_text(1, "p1", message_id=10)
             # Yield once so the background task actually starts and reaches slow_req.
             await asyncio.sleep(0)
 

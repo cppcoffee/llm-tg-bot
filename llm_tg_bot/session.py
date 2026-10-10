@@ -10,13 +10,17 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from llm_tg_bot.providers import ProviderSpec, RequestContext
+from llm_tg_bot.providers import PiProvider
 from llm_tg_bot.rendering import OutgoingMessage
 from llm_tg_bot.request_runner import run_provider_request, terminate_process
 from llm_tg_bot.workdirs import format_workdir
 
 logger = logging.getLogger(__name__)
 _WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _new_session_id(chat_id: int) -> str:
+    return f"tg-{chat_id}-{time.time_ns()}"
 
 OutputHandler = Callable[[int, OutgoingMessage], Awaitable[None]]
 RequestStartedHandler = Callable[[int, asyncio.Task[None]], None]
@@ -25,10 +29,10 @@ RequestStartedHandler = Callable[[int, asyncio.Task[None]], None]
 @dataclass(slots=True)
 class SessionRecord:
     chat_id: int
-    provider: ProviderSpec
+    provider: PiProvider
+    session_id: str
     last_activity: float = field(default_factory=time.monotonic)
     request_count: int = 0
-    provider_session_id: str | None = None
     active_task: asyncio.Task[None] | None = None
     active_process: asyncio.subprocess.Process | None = None
     # ponytail: queue carries message_id so edits can locate the entry.
@@ -63,7 +67,7 @@ class EditOutcome:
 class SessionManager:
     def __init__(
         self,
-        providers: dict[str, ProviderSpec],
+        provider: PiProvider,
         idle_timeout_seconds: int,
         output_callback: OutputHandler,
         request_started_callback: RequestStartedHandler | None = None,
@@ -71,7 +75,7 @@ class SessionManager:
         max_queue_size: int = 10,
         busy_timeout_seconds: int = 3600,
     ) -> None:
-        self._providers = providers
+        self._provider = provider
         self._idle_timeout_seconds = idle_timeout_seconds
         self._busy_timeout_seconds = busy_timeout_seconds
         self._output_callback = output_callback
@@ -87,36 +91,33 @@ class SessionManager:
     async def start_session(
         self,
         chat_id: int,
-        provider_name: str,
         *,
         cwd: Path | None = None,
     ) -> SessionRecord:
         await self.stop_session(chat_id, announce=False)
-        provider = self._provider_for_session(provider_name, cwd)
-        record = SessionRecord(chat_id=chat_id, provider=provider)
+        record = SessionRecord(
+            chat_id=chat_id,
+            provider=self._provider_with_cwd(cwd),
+            session_id=_new_session_id(chat_id),
+        )
         self._records[chat_id] = record
         self.register_activity(chat_id)
         return record
 
-    async def get_or_start_session(
-        self,
-        chat_id: int,
-        provider_name: str,
-    ) -> SessionRecord:
+    async def get_or_start_session(self, chat_id: int) -> SessionRecord:
         record = self._records.get(chat_id)
-        if record and record.provider.name == provider_name:
-            return record
-        return await self.start_session(chat_id, provider_name)
+        if record is None:
+            return await self.start_session(chat_id)
+        return record
 
     async def send_text(
         self,
         chat_id: int,
         text: str,
-        provider_name: str,
         *,
         message_id: int | None = None,
     ) -> SendResult:
-        record = await self.get_or_start_session(chat_id, provider_name)
+        record = await self.get_or_start_session(chat_id)
         if record.queued_count >= self._max_queue_size:
             raise RuntimeError(f"Queue full ({self._max_queue_size} prompts max)")
 
@@ -159,12 +160,6 @@ class SessionManager:
 
     def has_session(self, chat_id: int) -> bool:
         return chat_id in self._records
-
-    def active_provider_name(self, chat_id: int) -> str | None:
-        record = self._records.get(chat_id)
-        if record is None:
-            return None
-        return record.provider.name
 
     async def interrupt(self, chat_id: int) -> bool:
         self.register_activity(chat_id)
@@ -296,15 +291,10 @@ class SessionManager:
 
         return had_active_request
 
-    def _provider_for_session(
-        self,
-        provider_name: str,
-        cwd: Path | None,
-    ) -> ProviderSpec:
-        provider = self._providers[provider_name]
-        if cwd is None or cwd == provider.cwd:
-            return provider
-        return ProviderSpec(adapter=provider.adapter, cwd=cwd)
+    def _provider_with_cwd(self, cwd: Path | None) -> PiProvider:
+        if cwd is None or cwd == self._provider.cwd:
+            return self._provider
+        return PiProvider(cwd=cwd)
 
     def _track_active_process(
         self,
@@ -318,18 +308,13 @@ class SessionManager:
             result = await run_provider_request(
                 record.provider,
                 prompt,
-                request_context=RequestContext(
-                    is_followup=record.request_count > 0,
-                    session_id=record.provider_session_id,
-                ),
+                session_id=record.session_id,
                 process_tracker=lambda process: self._track_active_process(
                     record, process
                 ),
             )
             record.last_activity = result.completed_at
             if result.succeeded:
-                if result.session_id is not None:
-                    record.provider_session_id = result.session_id
                 record.request_count += 1
             if result.message is not None:
                 await self._output_callback(record.chat_id, result.message)

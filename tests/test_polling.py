@@ -14,13 +14,14 @@ from telegram.error import Conflict
 from llm_tg_bot.bot import BridgeBot
 from llm_tg_bot.config import Settings
 from llm_tg_bot.main import _bot_token_lock, async_main
+from llm_tg_bot.providers import PiProvider
 
 
 def settings_for(*tokens: str) -> Settings:
     return Settings(
         bot_tokens=list(tokens),
         allow_all_users=True,
-        default_provider="mock",
+        provider=PiProvider(),
     )
 
 

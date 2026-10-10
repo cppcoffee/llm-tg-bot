@@ -1,20 +1,17 @@
 from __future__ import annotations
 
-import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from llm_tg_bot.providers import ProviderSpec, ProviderAdapter
+from llm_tg_bot.providers import PiProvider
 from llm_tg_bot.rendering import OutgoingMessage
 from llm_tg_bot.session import SessionManager
 from tests.utils import FakeProcess
 
-class BaseSessionTestCase(unittest.IsolatedAsyncioTestCase):
-    adapter_class: type[ProviderAdapter]
-    provider_name: str
 
+class BaseSessionTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.provider = ProviderSpec(adapter=self.adapter_class())
+        self.provider = PiProvider()
         self.commands: list[tuple[str, ...]] = []
         self.outputs: list[tuple[int, str]] = []
 
@@ -22,7 +19,7 @@ class BaseSessionTestCase(unittest.IsolatedAsyncioTestCase):
             self.outputs.append((chat_id, message.text))
 
         self.manager = SessionManager(
-            providers={self.provider_name: self.provider},
+            provider=self.provider,
             idle_timeout_seconds=60,
             output_callback=output_callback,
         )

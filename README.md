@@ -1,10 +1,10 @@
 # llm-tg-bot
 
-A Python Telegram bot that bridges chat messages to local CLI agents like `codex`, `opencode`, and `pi`. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
+A Python Telegram bot that bridges chat messages to the local `pi` CLI agent. It uses a headless request/response model, rendering provider replies as rich text while keeping system messages in plain text.
 
 ## Features
 
-- **Multi-Provider Support**: Supports `codex`, `opencode`, and `pi` with per-chat logical sessions.
+- **pi Integration**: Headless `pi --print` requests with a generated session ID per chat session.
 - **Request Queueing**: Queues incoming messages when the provider is busy.
 - **Smart Formatting**: Converts Markdown to Telegram-safe HTML with automatic message splitting.
 - **Access Control**: User allowlist with numeric Telegram IDs.
@@ -50,8 +50,7 @@ Key variables in `.env`:
 
 - `TELEGRAM_BOT_TOKENS`: Your bot's API token(s). Comma-separate multiple tokens for multi-bot support.
 - `TELEGRAM_ALLOWED_USER_IDS`: Comma-separated user IDs (use `*` for open access in dev).
-- `WORKDIR`: Shared root for providers. `/new` lets you select subdirectories.
-- `DEFAULT_PROVIDER`: Default CLI to use (e.g., `codex`, `opencode`, or `pi`).
+- `WORKDIR`: Root directory for pi sessions. `/new` lets you select subdirectories.
 - `SESSION_IDLE_TIMEOUT_SECONDS`: Closes idle sessions (default: 60m).
 
 ## Deployment
@@ -100,7 +99,7 @@ See `deploy/llm-tg-bot.supervisor.example` for a template.
 See `deploy/llm-tg-bot.service.example` for a service file template.
 
 1. Copy the template: `sudo cp deploy/llm-tg-bot.service.example /etc/systemd/system/llm-tg-bot.service`
-2. Edit the service file (update paths, `User`, `WorkingDirectory`, and ensure the `PATH` environment variable contains your virtual environment's bin folder and the directory of your local CLI agents like pi or opencode).
+2. Edit the service file (update paths, `User`, `WorkingDirectory`, and ensure the `PATH` environment variable contains your virtual environment's bin folder and the directory of the `pi` CLI).
 3. Reload systemd daemon and enable/start the service:
    ```bash
    sudo systemctl daemon-reload
@@ -115,16 +114,13 @@ See `deploy/llm-tg-bot.service.example` for a service file template.
 
 ## Telegram Commands
 
-- `/new [provider] [dir]` — Start a fresh session in a specific directory.
-- `/use <provider>` — Switch the current chat's provider.
+- `/new [dir]` — Start a fresh session in a specific directory.
 - `/stop` — Terminate and forget the current session.
 - `/cancel` — Interrupt the in-flight request or abort `/new` setup.
 - `/status` — View current session and queue status.
-- `/list` — List available providers and working directories.
+- `/list` — Show the configured provider and workdir root.
 
 ## Notes
 
 - **Permissions**: Providers run in "yolo" / auto-approve mode, inheriting the bot process's OS permissions. **Always run the bot as a normal, unprivileged user.**
-- **Codex**: Defaults to `--skip-git-repo-check`. Set `CODEX_SKIP_GIT_REPO_CHECK=0` to require valid Git trees.
-- **opencode**: Runs in headless mode via `opencode run --format json` with `--dangerously-skip-permissions`. Resumes sessions with `--session <id>`.
-- **pi**: Runs in headless mode via `pi --print --mode json --approve`. Resumes sessions with `--session <id>`; sessions are grouped by the working directory.
+- **pi**: Runs headless via `pi --print --approve --session-id <id>`. The bot generates one session ID per chat session and rotates it on `/new`, so pi keeps the conversation history without the bot parsing it.

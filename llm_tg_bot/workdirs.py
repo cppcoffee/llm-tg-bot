@@ -2,51 +2,32 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llm_tg_bot.providers import ProviderSpec, get_provider_spec
+from llm_tg_bot.providers import PiProvider
 
 
 def format_workdir(workdir: Path | None) -> str:
     return str(workdir) if workdir else "(current working directory)"
 
 
-def providers_text(providers: dict[str, ProviderSpec]) -> str:
-    provider_items = sorted(providers.items())
-    workdirs = {format_workdir(provider.cwd) for _, provider in provider_items}
-    shared_workdir = next(iter(workdirs)) if len(workdirs) == 1 else None
-
-    lines = []
-    if shared_workdir is not None:
-        lines.append(f"Workdir root: {shared_workdir}")
-    lines.append("Available providers:")
-    for name, provider in provider_items:
-        line = f"- {name}: {provider.executable}"
-        if shared_workdir is None:
-            line += f" | workdir={format_workdir(provider.cwd)}"
-        lines.append(line)
-    lines.append("")
-    lines.append("Use /new to choose a provider and a direct child directory.")
+def provider_text(provider: PiProvider) -> str:
+    lines = [
+        f"Provider: {provider.name} ({provider.executable})",
+        f"Workdir root: {format_workdir(provider.cwd)}",
+        "",
+        "Use /new to choose a direct child directory.",
+    ]
     return "\n".join(lines)
 
 
-def directory_choices(
-    providers: dict[str, ProviderSpec],
-    provider_name: str,
-    *,
-    button_limit: int,
-) -> list[str]:
-    return [".", *visible_child_directory_names(providers, provider_name)[:button_limit]]
+def directory_choices(provider: PiProvider, *, button_limit: int) -> list[str]:
+    return [".", *visible_child_directory_names(provider)[:button_limit]]
 
 
-def directory_prompt(
-    providers: dict[str, ProviderSpec],
-    provider_name: str,
-    *,
-    preview_limit: int,
-) -> str:
-    root = session_root(providers, provider_name)
-    visible_directories = visible_child_directory_names(providers, provider_name)
+def directory_prompt(provider: PiProvider, *, preview_limit: int) -> str:
+    root = session_root(provider)
+    visible_directories = visible_child_directory_names(provider)
     lines = [
-        f"Select workdir for {provider_name} under {root}",
+        f"Select workdir for {provider.name} under {root}",
         "Use . for the root directory.",
     ]
 
@@ -70,16 +51,12 @@ def directory_prompt(
     return "\n".join(lines)
 
 
-def resolve_workdir_choice(
-    providers: dict[str, ProviderSpec],
-    provider_name: str,
-    value: str,
-) -> Path:
+def resolve_workdir_choice(provider: PiProvider, value: str) -> Path:
     choice = value.strip()
     if not choice:
         raise ValueError("Directory selection cannot be empty.")
 
-    root = session_root(providers, provider_name)
+    root = session_root(provider)
     if choice == ".":
         return root
 
@@ -104,11 +81,8 @@ def resolve_workdir_choice(
     return resolved
 
 
-def visible_child_directory_names(
-    providers: dict[str, ProviderSpec],
-    provider_name: str,
-) -> list[str]:
-    root = session_root(providers, provider_name)
+def visible_child_directory_names(provider: PiProvider) -> list[str]:
+    root = session_root(provider)
     try:
         directories = [
             child.name
@@ -120,8 +94,7 @@ def visible_child_directory_names(
     return sorted(directories, key=str.lower)
 
 
-def session_root(providers: dict[str, ProviderSpec], provider_name: str) -> Path:
-    provider = get_provider_spec(providers, provider_name)
+def session_root(provider: PiProvider) -> Path:
     root = provider.cwd or Path.cwd()
     try:
         resolved = root.expanduser().resolve(strict=True)
