@@ -4,9 +4,11 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from llm_tg_bot.commands import CommandHandler
 from llm_tg_bot.config import Settings
+from llm_tg_bot.model_info import ModelInfo
 from llm_tg_bot.providers import PiProvider
 from llm_tg_bot.rendering import OutgoingMessage
 from llm_tg_bot.session import SessionManager
@@ -16,6 +18,12 @@ class NewSessionFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.workdir = Path(tempfile.mkdtemp(prefix="llm-tg-bot-test-"))
         self.addCleanup(shutil.rmtree, self.workdir)
+        probe = patch(
+            "llm_tg_bot.commands.probe_model_info",
+            new=AsyncMock(return_value=ModelInfo("Test Model", "medium")),
+        )
+        probe.start()
+        self.addCleanup(probe.stop)
         settings = Settings(
             bot_tokens=["token"],
             allow_all_users=True,
@@ -49,6 +57,8 @@ class NewSessionFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Select provider", "\n".join(self.sent))
 
         self.assertTrue(await self.handler.handle_pending_input(1, "."))
+        self.assertIn("Model: Test Model", self.sent[-1])
+        self.assertIn("Thinking: medium", self.sent[-1])
         self.assertIn("[session started: pi", self.sent[-1])
         self.assertTrue(self.manager.has_session(1))
 
@@ -61,6 +71,7 @@ class NewSessionFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.handler.handle(1, "/use pi")
         self.assertEqual(self.sent[-1], "Unknown command. Use /help.")
         await self.handler.handle(1, "/status")
+        self.assertIn("Model: Test Model", self.sent[-1])
         self.assertNotIn("Preferred provider", self.sent[-1])
 
 

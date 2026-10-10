@@ -8,6 +8,7 @@ from pathlib import Path
 from telegram import ReplyKeyboardMarkup
 
 from llm_tg_bot.config import Settings
+from llm_tg_bot.model_info import probe_model_info
 from llm_tg_bot.session import SessionManager
 from llm_tg_bot.workdirs import (
     directory_choices,
@@ -120,7 +121,11 @@ class CommandHandler:
 
     async def _handle_status(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
-        await self._send_message(chat_id, self._session_manager.status_text(chat_id))
+        info = await probe_model_info(self._settings.provider)
+        details = f"{info.describe()}\n\n" if info else ""
+        await self._send_message(
+            chat_id, f"{details}{self._session_manager.status_text(chat_id)}"
+        )
 
     async def _handle_queue(self, chat_id: int, raw_arg: str) -> None:
         del raw_arg
@@ -193,9 +198,11 @@ class CommandHandler:
         except (FileNotFoundError, OSError, RuntimeError) as exc:
             raise ValueError(f"Failed to start pi session: {exc}") from exc
         self._pending_new_session_by_chat.discard(chat_id)
+        info = await probe_model_info(self._settings.provider)
+        details = f"{info.describe()}\n\n" if info else ""
         await self._send_message(
             chat_id,
-            f"[session started: {self._settings.provider.name} | workdir={workdir}]",
+            f"{details}[session started: {self._settings.provider.name} | workdir={workdir}]",
             reply_markup=self._keyboard_factory() if show_keyboard else None,
         )
 
